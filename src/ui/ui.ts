@@ -50,6 +50,7 @@ root.innerHTML = `
   <div id="prompt"></div>
   <div id="toast"></div>
   <div id="echo"><span>echo</span><p></p></div>
+  <div id="pad-legend">A jump · X knife · RT fire · Y reload · B use · Menu pause</div>
   <div id="reload" class="hidden">
     <div class="sweet"></div>
     <div class="needle"></div>
@@ -75,9 +76,11 @@ root.innerHTML = `
       <ul class="controls">
         <li>Move A/D or arrows. Jump Space. Climb W/S on ladders.</li>
         <li>Knife J. Shoot K. Reload R. Use E.</li>
+        <li>Pad: stick or D-pad, A jump, X knife, RT shoot, Y or RB reload, B use, Menu pauses.</li>
         <li>Gunshots draw the dead. The knife does not.</li>
         <li>Reload: tap again in the green. A miss jams the gun. Waiting the bar out is slow and safe.</li>
       </ul>
+      <p id="menu-pad" class="pad-only">A or Menu to climb.</p>
     </div>
   </section>
   <section id="shop" class="panel-wrap hidden">
@@ -87,6 +90,7 @@ root.innerHTML = `
       <p id="shop-wallet"></p>
       <div id="shop-items"></div>
       <p id="shop-msg"></p>
+      <p id="shop-pad" class="pad-only">Stick or D-pad chooses. A buys. B steps back.</p>
       <button id="shop-close" type="button">Step back</button>
     </div>
   </section>
@@ -132,6 +136,16 @@ let handlers: Handlers = {
 
 let toastTimer = 0;
 let echoTimer = 0;
+let shopIndex = 0;
+
+input.watchScheme((scheme) => {
+  document.body.classList.toggle('pad-active', scheme === 'pad');
+  $('climb').textContent = scheme === 'pad' ? 'A · climb' : 'Climb';
+  $('shop-close').textContent = scheme === 'pad' ? 'B · step back' : 'Step back';
+  $('resume').textContent = scheme === 'pad' ? 'A · keep climbing' : 'Keep climbing';
+  $('again').textContent = scheme === 'pad' ? 'A · climb again' : 'Climb again';
+  if (scheme === 'pad') applyShopSelection();
+});
 
 function wantTouch(): boolean {
   const params = new URLSearchParams(location.search);
@@ -233,6 +247,22 @@ function renderShop(run: RunState, limit: number): void {
     button.addEventListener('click', () => handlers.buy(item.id));
     list.appendChild(button);
   });
+  const buttons = shopButtons();
+  if (buttons.length === 0) shopIndex = 0;
+  else if (shopIndex >= buttons.length || buttons[shopIndex]?.disabled) {
+    shopIndex = buttons.findIndex((button) => !button.disabled);
+    if (shopIndex < 0) shopIndex = 0;
+  }
+  applyShopSelection();
+}
+
+function shopButtons(): HTMLButtonElement[] {
+  return [...document.querySelectorAll<HTMLButtonElement>('#shop-items .shop-item')];
+}
+
+function applyShopSelection(): void {
+  const buttons = shopButtons();
+  buttons.forEach((button, index) => button.classList.toggle('selected', input.device === 'pad' && index === shopIndex));
 }
 
 export const ui = {
@@ -283,7 +313,7 @@ export const ui = {
     bar.classList.toggle('jammed', jammed);
     bar.style.setProperty('--p', String(Math.max(0, Math.min(1, progress))));
     const label = bar.querySelector('.reload-label');
-    if (label) label.textContent = jammed ? 'jammed' : 'tap in the green';
+    if (label) label.textContent = jammed ? 'jammed' : input.device === 'pad' ? 'Y in the green' : 'tap in the green';
   },
   showEcho(text: string): void {
     const node = $('echo');
@@ -308,8 +338,22 @@ export const ui = {
   },
   showShop(run: RunState, limit: number): void {
     $('shop-msg').textContent = '';
+    shopIndex = 0;
     renderShop(run, limit);
     $('shop').classList.remove('hidden');
+  },
+  nudgeShop(dir: -1 | 1): void {
+    const buttons = shopButtons();
+    if (buttons.length === 0) return;
+    for (let step = 0; step < buttons.length; step++) {
+      shopIndex = (shopIndex + dir + buttons.length) % buttons.length;
+      if (!buttons[shopIndex]?.disabled) break;
+    }
+    applyShopSelection();
+  },
+  confirmShop(): void {
+    const button = shopButtons()[shopIndex];
+    if (button && !button.disabled) button.click();
   },
   refreshShop(run: RunState, limit: number): void {
     renderShop(run, limit);

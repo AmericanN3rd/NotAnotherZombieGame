@@ -191,6 +191,36 @@ body {
 
 .touch-controls { display: none; }
 body.touch-device.playing .touch-controls { display: block; }
+body.pad-active.touch-device.playing .touch-controls { display: none; }
+
+#pad-legend {
+  display: none;
+  position: absolute;
+  left: 50%;
+  bottom: calc(14px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  font-family: ui-monospace, sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--amber);
+  text-shadow: 0 2px 8px #000;
+  pointer-events: none;
+  white-space: nowrap;
+}
+body.pad-active.playing #pad-legend { display: block; }
+body:has(#shop:not(.hidden)) #pad-legend,
+body:has(#pause:not(.hidden)) #pad-legend,
+body:has(#menu:not(.hidden)) #pad-legend,
+body:has(#ending:not(.hidden)) #pad-legend { display: none; }
+
+.pad-only { display: none; color: var(--amber); font-family: ui-monospace, sans-serif; font-size: 12px; letter-spacing: 0.06em; }
+body.pad-active .pad-only { display: block; }
+
+.shop-item.selected {
+  border-color: var(--ink);
+  background: rgba(215, 161, 95, 0.14);
+}
 
 .stick {
   position: absolute;

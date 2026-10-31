@@ -261,7 +261,7 @@ export class TowerScene extends Phaser.Scene {
     this.drawLights(time);
     this.drawFlash();
 
-    if (frame.pauseEdge) this.onPause();
+    if (this.routeMenus(frame)) return;
     if (frame.flareEdge && this.phase === 'play') ui.toast('The flare gun is for the roof.');
 
     if (this.phase !== 'play') return;
@@ -509,7 +509,7 @@ export class TowerScene extends Phaser.Scene {
 
     let prompt: string | null = null;
     if (this.shopRect && overlaps(body, this.shopRect, 6)) {
-      prompt = 'E  ·  vending cache';
+      prompt = `${input.label('interact')}  ·  vending cache`;
       if (interactEdge) this.openShop();
     }
 
@@ -520,7 +520,7 @@ export class TowerScene extends Phaser.Scene {
         continue;
       }
       const near = overlaps(body, terminal.rect, 8);
-      if (near && !prompt) prompt = 'Hold E  ·  bypass lock';
+      if (near && !prompt) prompt = `Hold ${input.label('interact')}  ·  bypass lock`;
       if (near && interactHeld) terminal.charge = Math.min(1, terminal.charge + dt / 1.15);
       else terminal.charge = Math.max(0, terminal.charge - dt * 1.8);
       terminal.bar.setVisible(terminal.charge > 0.02);
@@ -607,6 +607,39 @@ export class TowerScene extends Phaser.Scene {
     else sfx.dry();
     ui.refreshShop(this.run, this.level.spendLimit);
     this.syncHud();
+  }
+
+  /**
+   * Pad menus share A / B / Menu with jump, use, and pause.
+   * Handled before gameplay so a confirm doesn't also fire a shot.
+   */
+  private routeMenus(frame: { jumpEdge: boolean; interactEdge: boolean; pauseEdge: boolean; navEdge: -1 | 0 | 1 }): boolean {
+    const pad = input.device === 'pad';
+    if (pad && this.phase === 'menu' && (frame.jumpEdge || frame.pauseEdge)) {
+      this.begin();
+      return true;
+    }
+    if (pad && this.phase === 'ending' && (frame.jumpEdge || frame.pauseEdge)) {
+      ui.hideOverlays();
+      this.scene.restart({ fresh: true });
+      return true;
+    }
+    if (pad && this.phase === 'shop') {
+      if (frame.navEdge !== 0) ui.nudgeShop(frame.navEdge);
+      if (frame.jumpEdge) ui.confirmShop();
+      if (frame.interactEdge || frame.pauseEdge) this.closeShop();
+      return true;
+    }
+    if (pad && this.phase === 'pause' && (frame.jumpEdge || frame.interactEdge)) {
+      this.closePause();
+      return true;
+    }
+    if (frame.pauseEdge) {
+      const playing = this.phase === 'play';
+      this.onPause();
+      return playing || this.phase !== 'play';
+    }
+    return this.phase !== 'play';
   }
 
   private onPause(): void {

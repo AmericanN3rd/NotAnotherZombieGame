@@ -19,7 +19,7 @@ npm install
 npm run dev
 ```
 
-Open the URL Vite prints. `npm run build` typechecks and writes `dist/`. `npm run preview` serves that folder. `npm test` checks the shop limits and the active-reload timing.
+Open the URL Vite prints. `npm run build` typechecks and writes `dist/`. `npm run preview` serves that folder. `npm test` checks the shop limits, the active-reload timing, and the Xbox button mapping.
 
 ### GitHub Pages
 
@@ -27,23 +27,27 @@ Open the URL Vite prints. `npm run build` typechecks and writes `dist/`. `npm ru
 
 ## Controls
 
-| Action | Keyboard | Touch |
-| --- | --- | --- |
-| Move | A/D or arrows | Left stick |
-| Jump | Space (W or Up when you are not on a ladder) | Jump |
-| Climb | W/S or Up/Down while overlapping a ladder | Stick up / down |
-| Knife | J or X | Knife |
-| Shoot | K or Z | Fire |
-| Reload | R | Reload |
-| Use | E or F | Use |
-| Flare | G or 3 | Flare on the HUD |
-| Pause | Esc or P | — |
+Keyboard, touch, and a standard-layout gamepad (the Xbox mapping in the browser Gamepad API) all drive the same actions. The pad is polled every frame, so plugging one in mid-climb works without a reload. The last device you actually used is the active one: on-screen touch controls hide while a pad is in use, and prompts switch to Xbox labels (`B` at the vending machine, `Y in the green` on the reload bar, a legend along the bottom).
 
-Aim a little up or down by holding up or down while you fire, as long as you are not climbing.
+| Action | Keyboard | Touch | Xbox pad |
+| --- | --- | --- | --- |
+| Move | A/D or arrows | Left stick | Left stick or D-pad |
+| Jump | Space (W or Up off a ladder) | Jump | A |
+| Climb | W/S or Up/Down on a ladder | Stick up / down | Stick or D-pad up / down |
+| Knife | J or X | Knife | X |
+| Shoot | K or Z | Fire | RT |
+| Reload | R | Reload | Y or RB |
+| Use | E or F | Use | B |
+| Flare | G or 3 | Flare on the HUD | LB (a reminder; it still does not fire) |
+| Pause | Esc or P | — | Menu |
+| Shop rows | 1–4 | tap a row | Stick or D-pad, A buys, B backs out |
+| Menus | click | tap | A confirms, B backs out, Menu toggles pause |
 
-Touch controls show on coarse pointers, narrow windows, or `?touch=1`.
+Aim a little up or down with W/S, the touch stick, or the left stick while you fire, as long as you are not climbing. Pushing the stick up does not jump; A does.
 
-Gunshots are loud and pull nearby undead. The knife is silent. Reload is a moving bar: tap again in the green band for a clean reload, tap outside it and the gun jams, or let the bar finish for a slow safe reload. The flare gun is carried and does not fire.
+Touch controls show on coarse pointers, narrow windows, or `?touch=1`, and hide again once a pad is the active input.
+
+Gunshots are loud and pull nearby undead. The knife is silent. Reload is a moving bar: press reload again in the green band for a clean reload, press outside it and the gun jams, or let the bar finish for a slow safe reload. That second press is the same button on a pad as the first. Notes are picked up by walking over them. B / E holds the lock bypass and opens the cache. The flare gun is carried and does not fire.
 
 ## Floors
 

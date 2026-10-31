@@ -1,0 +1,137 @@
+name: Android APK
+
+# Tag pushes and manual runs. This can publish a release before the PR merges.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(node -p "require('./package.json').version")"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Write version.json
+        run: |
+          node --input-type=module <<'EOF'
+          import { writeFileSync } from 'node:fs';
+          const version = process.env.VERSION;
+          const url = `https://github.com/${process.env.GITHUB_REPOSITORY}/releases/tag/v${version}`;
+          const body = JSON.stringify({ version, url }, null, 2) + '\n';
+          writeFileSync('public/version.json', body);
+          writeFileSync('version.json', body);
+          EOF
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npx cap sync android
+
+      - name: Choose signing
+        id: sign
+        env:
+          STORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PW: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PW: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$STORE_B64" ] && [ -n "$STORE_PW" ] && [ -n "$ALIAS" ] && [ -n "$KEY_PW" ]; then
+            echo "mode=release" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=debug" >> "$GITHUB_OUTPUT"
+            echo "Release signing secrets are not all set. Building a debug-signed APK."
+          fi
+
+      - name: Decode release keystore
+        if: steps.sign.outputs.mode == 'release'
+        env:
+          STORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: printf '%s' "$STORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+
+      - name: Build release APK
+        if: steps.sign.outputs.mode == 'release'
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: chmod +x ./gradlew && ./gradlew assembleRelease --no-daemon
+
+      - name: Build debug APK
+        if: steps.sign.outputs.mode == 'debug'
+        working-directory: android
+        run: chmod +x ./gradlew && ./gradlew assembleDebug --no-daemon
+
+      - name: Name the APK
+        id: apk
+        run: |
+          version="${{ steps.ver.outputs.version }}"
+          if [ "${{ steps.sign.outputs.mode }}" = "release" ]; then
+            src="android/app/build/outputs/apk/release/app-release.apk"
+            name="NAZG-${version}.apk"
+            note="Release-signed. Install over an older build only if it was signed with the same key."
+          else
+            src="android/app/build/outputs/apk/debug/app-debug.apk"
+            name="NAZG-${version}-debug.apk"
+            note="DEBUG-SIGNED. This is for testing, not a Play Store build. Later release-signed APKs will not install over this one."
+          fi
+          cp "$src" "$name"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "note<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$note" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          files: |
+            ${{ steps.apk.outputs.name }}
+            version.json
+          body: |
+            NAZG ${{ steps.ver.outputs.version }}
+
+            ${{ steps.apk.outputs.note }}
+
+            Install from a browser where you are signed in to GitHub. This repository is private, so the file is not public. Installing a newer APK over the old one works only when both were signed with the same key.
+
+            The in-app update check reads `version.json` from this release and fails silently when the private asset cannot be fetched without a token.
+          make_latest: true

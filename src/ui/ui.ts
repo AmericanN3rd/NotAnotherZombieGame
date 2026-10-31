@@ -1,4 +1,5 @@
 import { isMuted, playClip, stopClip, toggleMute } from '../game/audio';
+import { RELEASE_PAGE } from '../game/updateCheck';
 import { saveSettings, settings, watchSettings } from '../game/settings';
 import type { ItemId } from '../game/shop';
 import { SHOP_ITEMS, spentOn } from '../game/shop';
@@ -34,6 +35,7 @@ const root = document.getElementById('ui');
 if (!root) throw new Error('Missing #ui');
 
 root.innerHTML = `
+  <button id="update-banner" type="button" class="hidden">Update available</button>
   <div id="hud">
     <div class="hud-left">
       <div id="floor-name">Floor 1</div>
@@ -325,6 +327,20 @@ function renderShop(run: RunState, limit: number): void {
   applyShopSelection();
 }
 
+async function openReleasePage(url: string): Promise<void> {
+  try {
+    const { Capacitor } = await import('@capacitor/core');
+    if (Capacitor.isNativePlatform()) {
+      const { Browser } = await import('@capacitor/browser');
+      await Browser.open({ url });
+      return;
+    }
+  } catch {
+    // The browser plugin is absent in tests and plain web builds.
+  }
+  window.open(url, '_blank', 'noopener');
+}
+
 function shopButtons(): HTMLButtonElement[] {
   return [...document.querySelectorAll<HTMLButtonElement>('#shop-items .shop-item')];
 }
@@ -335,6 +351,14 @@ function applyShopSelection(): void {
 }
 
 export const ui = {
+  offerUpdate(url: string = RELEASE_PAGE): void {
+    const banner = $('update-banner');
+    banner.textContent = 'Update available';
+    banner.classList.remove('hidden');
+    banner.onclick = () => {
+      void openReleasePage(url);
+    };
+  },
   bind(next: Handlers): void {
     handlers = next;
     $('mute').textContent = isMuted() ? 'Muted' : 'Sound';

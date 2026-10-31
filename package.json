@@ -2,7 +2,7 @@
   "name": "nazg",
   "private": true,
   "version": "0.1.0",
-  "description": "NAZG (Not Another Zombie Game) — prototype of floors 1–3",
+  "description": "NAZG (Not Another Zombie Game) — floors 1–8, web and a private Android APK",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,9 +11,15 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@capacitor/android": "^7.6.10",
+    "@capacitor/app": "^7.1.2",
+    "@capacitor/browser": "^7.0.5",
+    "@capacitor/core": "^7.6.10",
+    "@capacitor/status-bar": "^7.0.6",
     "phaser": "^3.88.2"
   },
   "devDependencies": {
+    "@capacitor/cli": "^7.6.10",
     "typescript": "^5.6.3",
     "vite": "^6.2.0",
     "vitest": "^3.0.9"

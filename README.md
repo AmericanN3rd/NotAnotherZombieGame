@@ -25,6 +25,31 @@ Open the URL Vite prints. `npm run build` typechecks and writes `dist/`. `npm ru
 
 `vite.config.ts` uses a relative `base`, so `dist/` works at a project-site subpath. `.github/workflows/pages.yml` builds and deploys on pushes to `main` (and when the workflow is run by hand). After the action is enabled in the repo’s Pages settings (source: GitHub Actions), the climb is served from the Pages URL.
 
+### Android (private APK, not Play Store)
+
+The phone build is a Capacitor wrapper around the same Vite output. It stays landscape and fullscreen, keeps the screen on, and the Android back button pauses. Xbox pads use the same standard Gamepad mapping inside the WebView. There is no Play Console setup.
+
+Releases are cut by pushing a `v*` tag (or running the Android APK workflow by hand). The workflow attaches an APK to a GitHub Release. This repository is private, so the file is only visible when you are signed in.
+
+Install on a phone:
+
+1. On the phone, open the release page in a browser where you are signed in to GitHub: https://github.com/AmericanN3rd/NotAnotherZombieGame/releases
+2. Download the `.apk`.
+3. If Android asks, allow **Install unknown apps** for that browser.
+4. Open the downloaded file and install it.
+5. To update, download the newer APK and install it over the old one. That only works when both files were signed with the same key. A debug-signed build will not update a release-signed build, or the other way around.
+
+On launch, if the phone is online, the app tries to read `version.json` from the latest release. A private asset refuses that anonymous request, so the check fails silently and the game just starts. If a newer version is readable, a prompt opens the release page in the browser.
+
+A release-signed APK needs these Actions secrets (the keystore never belongs in the repo):
+
+- `ANDROID_KEYSTORE_BASE64` — base64 of the `.keystore` file
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+If any of them are missing, the workflow builds a debug-signed APK instead and names it `NAZG-<version>-debug.apk`.
+
 ## Controls
 
 Keyboard, touch, and a standard-layout gamepad (the Xbox mapping in the browser Gamepad API) all drive the same actions. The pad is polled every frame, so plugging one in mid-climb works without a reload. The last device you actually used is the active one: on-screen touch controls hide while a pad is in use, and prompts switch to Xbox labels (`B` at the vending machine, `Y in the green` on the reload bar, a legend along the bottom).
@@ -39,7 +64,7 @@ Keyboard, touch, and a standard-layout gamepad (the Xbox mapping in the browser 
 | Reload | R | Reload | Y or RB |
 | Use | E or F | Use | B |
 | Flare | G or 3 | Flare on the HUD | LB (a reminder; it still does not fire) |
-| Pause | Esc or P | — | Menu |
+| Pause | Esc or P, or Android back | — | Menu |
 | Shop rows | 1–4 | tap a row | Stick or D-pad, A buys, B backs out |
 | Menus | click | tap | A confirms, B backs out, Menu toggles pause |
 

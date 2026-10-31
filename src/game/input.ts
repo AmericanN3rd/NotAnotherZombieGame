@@ -77,6 +77,21 @@ export class Input {
     window.addEventListener('blur', () => this.releaseKeys());
     window.addEventListener('gamepadconnected', () => this.pollPad());
     window.addEventListener('gamepaddisconnected', () => this.pollPad());
+    void this.bindHardwareBack();
+  }
+
+  /** Android back pauses instead of leaving the activity. */
+  private async bindHardwareBack(): Promise<void> {
+    try {
+      const { Capacitor } = await import('@capacitor/core');
+      if (!Capacitor.isNativePlatform()) return;
+      const { App } = await import('@capacitor/app');
+      await App.addListener('backButton', () => {
+        this.edges.pause = true;
+      });
+    } catch {
+      // Browser build.
+    }
   }
 
   get device(): Scheme {

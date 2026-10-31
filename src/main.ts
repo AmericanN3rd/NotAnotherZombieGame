@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
 import { GRAVITY, VIEW_H, VIEW_W } from './game/balance';
 import { TowerScene } from './game/scenes/TowerScene';
+import { checkForUpdate } from './game/updateCheck';
+import { ui } from './ui/ui';
 
 const debug = new URLSearchParams(location.search).has('debug');
 
@@ -28,3 +30,17 @@ new Phaser.Game({
   scene: [TowerScene],
   banner: false,
 });
+
+void checkForUpdate((url) => ui.offerUpdate(url));
+void hideNativeChrome();
+
+async function hideNativeChrome(): Promise<void> {
+  try {
+    const { Capacitor } = await import('@capacitor/core');
+    if (!Capacitor.isNativePlatform()) return;
+    const { StatusBar } = await import('@capacitor/status-bar');
+    await StatusBar.hide();
+  } catch {
+    // Running in a browser.
+  }
+}

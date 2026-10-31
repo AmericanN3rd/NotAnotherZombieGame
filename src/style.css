@@ -101,6 +101,24 @@ body.low-fx #vignette.pulse { animation: none; }
 
 #ui button, #ui .stick, #ui .panel { pointer-events: auto; }
 
+#update-banner {
+  position: absolute;
+  top: calc(8px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  pointer-events: auto;
+  background: #c4b49a;
+  color: #1a120c;
+  border: 0;
+  font-family: ui-monospace, sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 12px;
+  padding: 8px 12px;
+}
+#update-banner.hidden { display: none; }
+
 #hud {
   display: flex;
   justify-content: space-between;

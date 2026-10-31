@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
-import { unlockAudio, sfx } from '../audio';
+import { playClip, sfx, startAmbience, unlockAudio } from '../audio';
+import { paletteFor } from '../palette';
+import { saveSettings, settings } from '../settings';
 import { BULLET_SPEED, GRAVITY, IFRAME_TIME, MACAW_NOISE, MELEE_DAMAGE, MELEE_REACH } from '../balance';
 import { createTextures } from '../textures';
 import { Enemy } from '../entities/enemy';
@@ -12,7 +14,7 @@ import { bulletSpread, createRun, gearLevel, noiseRadius, recoilScale, type RunS
 import type { LevelData, Rect } from '../types';
 import { ui } from '../../ui/ui';
 
-type Phase = 'menu' | 'play' | 'shop' | 'pause' | 'transition' | 'down' | 'ending';
+type Phase = 'menu' | 'play' | 'shop' | 'wager' | 'pause' | 'transition' | 'down' | 'ending';
 
 interface LiveDoor {
   id: string;
@@ -77,6 +79,9 @@ export class TowerScene extends Phaser.Scene {
   private exits: Rect[] = [];
   private checkpoints: { x: number; y: number; rect: Rect }[] = [];
   private shopRect: Rect | null = null;
+  private challengeRect: Rect | null = null;
+  private storm = 8;
+  private dust: Phaser.GameObjects.Arc[] = [];
   private crumbleRect: Rect | null = null;
   private crumbleSprite: Phaser.GameObjects.Rectangle | null = null;
   private collapsed = false;
@@ -118,7 +123,11 @@ export class TowerScene extends Phaser.Scene {
   }
 
   private build(): void {
-    this.level = getLevel(this.run.floor);
+    this.level = getLevel(this.run.floor, {
+      seed: this.run.seed,
+      seenNotes: this.run.notes.map((note) => note.id),
+    });
+    if (this.level.builtSeed != null) this.run.builtSeed = this.level.builtSeed;
     if (this.run.checkpoint.floor !== this.level.id) {
       this.run.checkpoint = { floor: this.level.id, x: this.level.spawn.x, y: this.level.spawn.y };
     }
@@ -151,6 +160,9 @@ export class TowerScene extends Phaser.Scene {
     this.flashGfx = this.add.graphics().setDepth(20).setBlendMode(Phaser.BlendModes.ADD);
     this.lightDefs = this.level.lights;
 
+    const palette = paletteFor(this.level.id);
+    this.cameras.main.setBackgroundColor(palette.bg);
+    document.body.style.background = palette.bg;
     this.cameras.main.setBounds(0, 0, this.level.width, this.level.height);
     this.cameras.main.startFollow(this.player.sprite, true, 0.16, 0.16);
     this.cameras.main.setDeadzone(36, 28);
@@ -158,9 +170,18 @@ export class TowerScene extends Phaser.Scene {
     this.cameras.main.fadeIn(250, 7, 8, 12);
 
     ui.bind({
-      climb: () => this.begin(),
+      climb: () => this.startClimb(),
+      applySeed: (seed) => this.applySeed(seed),
+      replayIntro: () => {
+        ui.hideSettings();
+        ui.showIntro(true, () => {
+          settings.introSeen = true;
+          saveSettings(settings);
+        });
+      },
       buy: (id) => this.buy(id),
       closeShop: () => this.closeShop(),
+      closeWager: () => this.closeWager(),
       resume: () => this.closePause(),
       restart: () => {
         ui.hideOverlays();
@@ -208,10 +229,14 @@ export class TowerScene extends Phaser.Scene {
           reload: this.reload.phase,
           owned: { ...this.run.owned },
           enemies: this.enemies.filter((enemy) => !enemy.dead).length,
+          challenge: this.level.challenge,
+          seed: this.run.builtSeed ?? this.run.seed,
         }),
         place: (x: number, y: number) => {
           this.player.place(x, y);
         },
+        seed: () => this.run.builtSeed ?? this.run.seed,
+        setSeed: (seed: number) => this.applySeed(seed),
       };
     }
 
@@ -228,6 +253,102 @@ export class TowerScene extends Phaser.Scene {
       ui.playMode(false);
     }
     this.syncHud();
+  }
+
+  private startClimb(): void {
+    if (this.phase !== 'menu') return;
+    unlockAudio();
+    if (!settings.introSeen) {
+      ui.showIntro(false, () => {
+        settings.introSeen = true;
+        saveSettings(settings);
+        this.begin();
+        startAmbience();
+      });
+      return;
+    }
+    this.begin();
+    startAmbience();
+  }
+
+  private applySeed(seed: number): void {
+    const next = Math.floor(seed);
+    if (!Number.isFinite(next)) return;
+    this.run.seed = next;
+    settings.seed = next;
+    saveSettings(settings);
+    if (this.level.id >= 4) this.scene.restart({ floor: this.level.id });
+  }
+
+  private mood(dt: number): void {
+    const canvas = this.game.canvas.getBoundingClientRect();
+    const cam = this.cameras.main;
+    const scaleX = canvas.width / cam.width;
+    const scaleY = canvas.height / cam.height;
+    const lx = canvas.left + (this.player.sprite.x - cam.scrollX) * scaleX;
+    const ly = canvas.top + (this.player.sprite.y - 22 - cam.scrollY) * scaleY;
+    const root = document.documentElement;
+    root.style.setProperty('--lx', `${lx}px`);
+    root.style.setProperty('--ly', `${ly}px`);
+    const dark = 0.94 - settings.brightness * 0.5;
+    root.style.setProperty('--dark', dark.toFixed(3));
+    let threat = 1 - this.run.hp / this.run.maxHp;
+    for (const enemy of this.enemies) {
+      if (enemy.dead) continue;
+      const dist = Math.hypot(enemy.sprite.x - this.player.sprite.x, enemy.sprite.y - this.player.sprite.y);
+      threat = Math.max(threat, Math.max(0, 1 - dist / 190));
+    }
+    const vignette = document.getElementById('vignette');
+    vignette?.style.setProperty('--threat', threat.toFixed(3));
+    vignette?.classList.toggle('pulse', threat > 0.42 && !settings.lowEffects);
+    document.body.classList.toggle('low-fx', settings.lowEffects);
+    if (!settings.lowEffects) {
+      this.storm -= dt;
+      if (this.storm <= 0) {
+        this.storm = 14 + Math.random() * 16;
+        document.getElementById('lightning')?.classList.add('flash');
+        playClip('thunder', 0.28);
+        window.setTimeout(() => document.getElementById('lightning')?.classList.remove('flash'), 160);
+      }
+      for (const mote of this.dust) {
+        mote.y -= 6 * dt;
+        mote.x += Math.sin(mote.y * 0.02) * 8 * dt;
+        if (mote.y < cam.scrollY - 20) {
+          mote.y = cam.scrollY + cam.height + 10;
+          mote.x = cam.scrollX + Math.random() * cam.width;
+        }
+      }
+    }
+  }
+
+  private slipLadders(): void {
+    if (this.level.id < 4 || !this.player.climbing) return;
+    const near = this.enemies.some((enemy) => {
+      if (enemy.dead || enemy.kind !== 'undead') return false;
+      return Math.hypot(enemy.sprite.x - this.player.sprite.x, enemy.sprite.y - this.player.sprite.y) < 150;
+    });
+    if (!near) return;
+    this.player.slipLock = 0.7;
+    this.player.climbing = false;
+    this.player.body.setAllowGravity(true);
+    this.hurtPlayer(1, this.player.facing * -1 || -1);
+    this.player.body.setVelocityY(120);
+    ui.toast('The rung gives. Something is too close.');
+  }
+
+  private openWager(): void {
+    this.phase = 'wager';
+    this.physics.pause();
+    this.player.sprite.setVelocity(0, 0);
+    ui.setPrompt(null);
+    ui.showWager();
+  }
+
+  private closeWager(): void {
+    if (this.phase !== 'wager') return;
+    this.phase = 'play';
+    this.physics.resume();
+    ui.hideWager();
   }
 
   private begin(): void {
@@ -266,6 +387,8 @@ export class TowerScene extends Phaser.Scene {
 
     if (this.phase !== 'play') return;
 
+    this.mood(dt);
+    this.slipLadders();
     this.groundCollider.active = !this.player.climbing;
     const ladder = this.ladderUnder();
     const stepped = this.player.update(frame, dt, ladder != null, ladder ? ladder.x + ladder.w / 2 : null, this.floors);
@@ -508,6 +631,10 @@ export class TowerScene extends Phaser.Scene {
     }
 
     let prompt: string | null = null;
+    if (this.challengeRect && overlaps(body, this.challengeRect, 8)) {
+      prompt = `${input.label('interact')}  ·  optional wager`;
+      if (interactEdge) this.openWager();
+    }
     if (this.shopRect && overlaps(body, this.shopRect, 6)) {
       prompt = `${input.label('interact')}  ·  vending cache`;
       if (interactEdge) this.openShop();
@@ -630,6 +757,10 @@ export class TowerScene extends Phaser.Scene {
       if (frame.interactEdge || frame.pauseEdge) this.closeShop();
       return true;
     }
+    if (this.phase === 'wager') {
+      if (frame.interactEdge || frame.pauseEdge || frame.jumpEdge) this.closeWager();
+      return true;
+    }
     if (pad && this.phase === 'pause' && (frame.jumpEdge || frame.interactEdge)) {
       this.closePause();
       return true;
@@ -654,7 +785,7 @@ export class TowerScene extends Phaser.Scene {
     if (this.phase !== 'play') return;
     this.phase = 'pause';
     this.physics.pause();
-    ui.showPause(this.run.notes);
+    ui.showPause(this.run.notes, this.run.builtSeed ?? this.run.seed);
   }
 
   private closePause(): void {
@@ -696,7 +827,7 @@ export class TowerScene extends Phaser.Scene {
 
   private gotoFloor(next: number): void {
     if (this.transitioning || (this.phase !== 'play' && this.phase !== 'menu')) return;
-    if (next > 3) {
+    if (next > 8) {
       this.ending();
       return;
     }
@@ -769,7 +900,7 @@ export class TowerScene extends Phaser.Scene {
   private paintBackdrop(): void {
     const { width, height, id } = this.level;
     const g = this.add.graphics().setDepth(0);
-    g.fillStyle(id === 3 ? 0x120e12 : 0x10131a, 1);
+    g.fillStyle(paletteFor(id).wall, 1);
     g.fillRect(0, 0, width, height);
     const rand = mulberry32(id * 97 + 3);
     for (let x = 40; x < width; x += 150 + Math.floor(rand() * 80)) {
@@ -810,8 +941,9 @@ export class TowerScene extends Phaser.Scene {
   }
 
   private placeGeometry(): void {
-    const lip = this.level.id === 3 ? 0x6a3838 : this.level.id === 2 ? 0x4a4038 : 0x3e4658;
-    const fill = this.level.id === 3 ? 0x241c22 : this.level.id === 2 ? 0x292428 : 0x232733;
+    const palette = paletteFor(this.level.id);
+    const lip = palette.lip;
+    const fill = palette.floor;
     for (const rect of this.level.platforms) this.addBlock(rect, fill, lip, true);
     for (const rect of this.level.walls) this.addBlock(rect, 0x2c313c, 0x465066, false);
     for (const rect of this.level.doors) {
@@ -927,6 +1059,23 @@ export class TowerScene extends Phaser.Scene {
       this.add.sprite(shop.x, shop.y, 'vending').setOrigin(0.5, 1).setDepth(8);
       this.shopRect = { x: shop.x - 28, y: shop.y - 64, w: 60, h: 68 };
     }
+    if (this.level.challenge) {
+      const machine = this.level.challenge;
+      const sprite = this.add.sprite(machine.x, machine.y, 'vending').setOrigin(0.5, 1).setDepth(8);
+      sprite.setTint(0xe0b15a);
+      this.challengeRect = { x: machine.x - 30, y: machine.y - 66, w: 64, h: 70 };
+    }
+    if (!settings.lowEffects) {
+      for (let i = 0; i < 22; i++) {
+        const mote = this.add.circle(Math.random() * this.level.width, Math.random() * this.level.height, 1.2, 0xcbb892, 0.28);
+        mote.setDepth(19);
+        this.dust.push(mote);
+      }
+    }
+    for (const light of this.level.lights) {
+      if (!light.dead) continue;
+      this.add.rectangle(light.x, light.y, 7, 4, 0x121212).setDepth(3);
+    }
     for (const terminal of this.level.terminals) {
       this.add.sprite(terminal.x, terminal.y, 'terminal').setOrigin(0.5, 1).setDepth(8);
       const bar = this.add.rectangle(terminal.x, terminal.y - 40, 4, 4, 0x9cbc6a).setOrigin(0, 0.5).setDepth(9);
@@ -956,7 +1105,8 @@ export class TowerScene extends Phaser.Scene {
     if (!g) return;
     g.clear();
     for (const light of this.lightDefs) {
-      const flick = light.flicker ? 0.65 + Math.sin(time / 90 + light.x) * 0.35 : 1;
+      if (light.dead) continue;
+      const flick = light.flicker && !settings.lowEffects ? 0.45 + Math.sin(time / 90 + light.x) * 0.55 : 1;
       g.fillStyle(light.color, 0.055 * flick);
       g.fillCircle(light.x, light.y, light.radius);
     }

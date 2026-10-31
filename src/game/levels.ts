@@ -1,4 +1,5 @@
 import { FLOOR_1_SPEND_LIMIT } from './balance';
+import { generateFloor } from './generate';
 import type { LevelData, Rect } from './types';
 
 function stair(x: number, top: number, w: number, bottom: number): Rect {
@@ -240,7 +241,8 @@ const floor3 = (): LevelData => ({
 
 const LEVELS = [floor1, floor2, floor3];
 
-export function getLevel(floor: number): LevelData {
-  const build = LEVELS[floor - 1] ?? LEVELS[0];
+export function getLevel(floor: number, opts?: { seed?: number; seenNotes?: readonly string[] }): LevelData {
+  if (floor >= 4 && floor <= 8) return generateFloor(floor, opts?.seed ?? 1, opts?.seenNotes ?? []);
+  const build = LEVELS[Math.min(Math.max(floor, 1), 3) - 1] ?? floor1;
   return build();
 }

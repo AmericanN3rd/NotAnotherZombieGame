@@ -1,4 +1,8 @@
-/** Small synthesized kit. No sample files, so the prototype stays offline and quiet until a gesture. */
+/**
+ * Gunfire, melee, and UI stings stay synthesized.
+ * Weather, the door, the walls, and the music beds are CC0 files in public/audio.
+ * See AUDIO_CREDITS.md.
+ */
 
 let ctx: AudioContext | null = null;
 let muted = false;
@@ -25,9 +29,11 @@ export function toggleMute(): boolean {
   muted = !muted;
   if (muted) {
     drone?.gain.gain.setTargetAtTime(0, ctx?.currentTime ?? 0, 0.05);
+    for (const bed of beds) bed.volume = 0;
   } else {
     unlockAudio();
     if (drone && ctx) drone.gain.gain.setTargetAtTime(0.018, ctx.currentTime, 0.2);
+    for (const bed of beds) bed.volume = bed.dataset.volume ? Number(bed.dataset.volume) : 0.4;
   }
   return muted;
 }
@@ -147,3 +153,40 @@ export const sfx = {
     tone(70, 0.4, 'sine', 0.06, 40);
   },
 };
+
+export type ClipName = 'rain' | 'thunder' | 'door-slam' | 'wail' | 'teeth' | 'scratch' | 'piano' | 'strings';
+
+const beds = new Set<HTMLAudioElement>();
+let pianoBed: HTMLAudioElement | null = null;
+
+function clipUrl(name: ClipName): string {
+  return `${import.meta.env.BASE_URL}audio/${name}.ogg`;
+}
+
+export function playClip(name: ClipName, volume = 0.45, loop = false): HTMLAudioElement | null {
+  const audio = new Audio(clipUrl(name));
+  audio.loop = loop;
+  audio.preload = 'auto';
+  audio.dataset.volume = String(volume);
+  audio.volume = muted ? 0 : volume;
+  beds.add(audio);
+  if (!loop) audio.addEventListener('ended', () => beds.delete(audio));
+  void audio.play().catch(() => undefined);
+  return audio;
+}
+
+export function stopClip(audio: HTMLAudioElement | null): void {
+  if (!audio) return;
+  audio.pause();
+  beds.delete(audio);
+}
+
+export function startAmbience(): void {
+  if (pianoBed) return;
+  pianoBed = playClip('piano', 0.07, true);
+}
+
+export function stopAmbience(): void {
+  stopClip(pianoBed);
+  pianoBed = null;
+}

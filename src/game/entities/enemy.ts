@@ -87,7 +87,7 @@ export class Enemy {
     this.scene = scene;
     this.kind = spec.kind;
     this.stats = KINDS[spec.kind];
-    this.hp = this.stats.hp;
+    this.hp = this.stats.hp + (spec.bonusHp ?? 0);
     this.behindDoor = spec.behindDoor;
     this.awake = !spec.dormant;
     this.homeX = spec.x;

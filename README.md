@@ -53,9 +53,15 @@ Gunshots are loud and pull nearby undead. The knife is silent. Reload is a movin
 
 1. **Quiet.** A ward with something that sleeps until you shoot, the line “they’re inside, be careful.”, the line “I can’t wake up.”, and the first vending cache. The wallet starts at 36 coins (a stand-in for Recon earnings). This floor will only sell 30 coins of gear: pistol rounds, compensator, power, or a silencer.
 2. **Two ways up.** Spikes and pits along the maintenance hall, with no undead. A vent is faster and ends at a computer lock. Bypass it and the undead (and a ferret) on the other side wake up.
-3. **Hollow floors.** More undead, ferrets, and a macaw that screams and calls bigger threats. Ladders start here. A crumbled span drops you to the bottom of the floor; you keep your gear, then climb out. The landing above that is as far as this prototype goes.
+3. **Hollow floors.** More undead, ferrets, and a macaw that screams and calls bigger threats. Ladders start here. A crumbled span drops you to the bottom of the floor; you keep your gear, then climb out.
+4–8. **Generated.** Hand-authored chunks (corridors, spike runs, pits, ladder shafts, vents, locks, crumble drops, shops, note nooks) are chained from a seed. Difficulty ticks up each floor: more and tougher undead, denser traps, fewer medkits and coins. From floor 4, a ladder slips if an undead is close. The pause screen shows the seed that built the floor; Settings can lock one for testing, and `window.__nazg.setSeed(n)` does the same. Floor 8 ends on another “to be continued.”
+6. **Wager.** A vending machine offers three optional lanes under the hall. Harder lanes pay more coins. The stairs up stay on the main floor.
 
-Walking into a floor above your gear (one step per installed upgrade, starting from the kit you already have) shows a warning and does not stop you.
+The first time you climb, a short intro plays: rain, the door, thunder, then the tower answering. After that it can be skipped, or replayed from Settings. Brightness and a low-effects toggle live there too.
+
+Walking into a floor above your gear (one step per installed upgrade, starting from the kit you already have) shows a warning and does not stop you. You can finish the whole climb without meeting anyone. There are no living people in this build.
+
+CC0 audio is listed in `AUDIO_CREDITS.md`. A dedicated teeth-grinding take was not found; the intro uses a CC0 bone snap for that layer and a CC0 scrape for the walls.
 
 ## Stubbed
 

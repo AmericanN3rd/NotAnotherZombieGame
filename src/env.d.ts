@@ -9,6 +9,8 @@ interface NazgDebug {
   fill: () => void;
   status: () => Record<string, unknown>;
   place: (x: number, y: number) => void;
+  seed: () => number;
+  setSeed: (seed: number) => void;
 }
 
 interface Window {

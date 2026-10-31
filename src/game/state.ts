@@ -1,4 +1,5 @@
 import { MAG_SIZE, PLAYER_MAX_HP, START_COINS, START_MAG, START_RESERVE } from './balance';
+import { settings } from './settings';
 
 export interface OwnedUpgrades {
   power: boolean;
@@ -36,6 +37,9 @@ export interface RunState {
   crumbled: boolean;
   reloadTaught: boolean;
   gearWarned: Record<number, boolean>;
+  /** Requested procedural seed. Floors 4–8 may retry upward if a layout fails. */
+  seed: number;
+  builtSeed?: number;
 }
 
 export function createRun(): RunState {
@@ -56,6 +60,7 @@ export function createRun(): RunState {
     crumbled: false,
     reloadTaught: false,
     gearWarned: {},
+    seed: settings.seed ?? Math.floor(Math.random() * 900000) + 1,
   };
 }
 

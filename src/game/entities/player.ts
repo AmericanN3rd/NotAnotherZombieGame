@@ -13,6 +13,8 @@ export class Player {
   fireCd = 0;
   /** Extra spread that decays. Compensator scales how fast this builds. */
   recoil = 0;
+  /** Set when a nearby undead kicks the climber off. Blocks re-grab. */
+  slipLock = 0;
   private prevKeyUp = false;
   private walkT = 0;
   coyote = COYOTE_TIME;
@@ -48,6 +50,13 @@ export class Player {
     const body = this.body;
     this.meleeCd = Math.max(0, this.meleeCd - dt);
     this.fireCd = Math.max(0, this.fireCd - dt);
+    if (this.slipLock > 0) {
+      this.slipLock -= dt;
+      if (this.climbing) {
+        this.climbing = false;
+        body.setAllowGravity(true);
+      }
+    }
     this.recoil = Math.max(0, this.recoil - dt * 1.5);
     if (this.iframes > 0) {
       this.iframes -= dt;
@@ -67,7 +76,7 @@ export class Player {
       body.setVelocityY(JUMP_VELOCITY);
       this.coyote = 0;
       this.jumpBuffer = 0;
-    } else if (onLadder && (this.climbing || up || down)) {
+    } else if (this.slipLock <= 0 && onLadder && (this.climbing || up || down)) {
       if (!this.climbing && (up || down)) {
         this.climbing = true;
         this.coyote = 0;

@@ -1,4 +1,5 @@
-import { isMuted, toggleMute } from '../game/audio';
+import { isMuted, playClip, stopClip, toggleMute } from '../game/audio';
+import { saveSettings, settings, watchSettings } from '../game/settings';
 import type { ItemId } from '../game/shop';
 import { SHOP_ITEMS, spentOn } from '../game/shop';
 import type { EchoNote, RunState } from '../game/state';
@@ -21,9 +22,12 @@ interface Handlers {
   climb: () => void;
   buy: (id: ItemId) => void;
   closeShop: () => void;
+  closeWager: () => void;
   resume: () => void;
   restart: () => void;
   flare: () => void;
+  applySeed: (seed: number) => void;
+  replayIntro: () => void;
 }
 
 const root = document.getElementById('ui');
@@ -71,8 +75,9 @@ root.innerHTML = `
       <p class="kicker">a tower, already dead</p>
       <h1>NAZG</h1>
       <p class="sub">Not Another Zombie Game</p>
-      <p class="blurb">Floors 1–3. You never see anyone alive. The flare gun stays on your belt until the roof.</p>
+      <p class="blurb">Floors 1–8. You never see anyone alive. The flare gun stays on your belt until the roof.</p>
       <button id="climb" type="button">Climb</button>
+      <button id="open-settings" type="button" class="ghost">Settings</button>
       <ul class="controls">
         <li>Move A/D or arrows. Jump Space. Climb W/S on ladders.</li>
         <li>Knife J. Shoot K. Reload R. Use E.</li>
@@ -99,7 +104,9 @@ root.innerHTML = `
       <p class="kicker">held breath</p>
       <h2>Paused</h2>
       <div id="journal"></div>
+      <p id="pause-seed" class="seed-line"></p>
       <button id="resume" type="button">Keep climbing</button>
+      <button id="pause-settings" type="button" class="ghost">Settings</button>
     </div>
   </section>
   <section id="transition" class="panel-wrap hidden">
@@ -108,6 +115,41 @@ root.innerHTML = `
       <h2 id="tr-title">Floor 2</h2>
       <p id="tr-sub"></p>
     </div>
+  </section>
+  <section id="settings" class="panel-wrap hidden">
+    <div class="panel">
+      <p class="kicker">settings</p>
+      <h2>How dark, how loud</h2>
+      <label class="setting">Brightness <input id="set-bright" type="range" min="35" max="100" value="62" /></label>
+      <label class="setting"><input id="set-low" type="checkbox" /> Low effects</label>
+      <label class="setting">Seed <input id="set-seed" type="number" min="1" step="1" /></label>
+      <p class="empty">Floors 4–8 are built from this seed. The pause screen shows the seed that actually fit.</p>
+      <div class="setting-row">
+        <button id="set-apply" type="button">Apply seed</button>
+        <button id="set-replay" type="button" class="ghost">Replay the door</button>
+        <button id="set-close" type="button" class="ghost">Close</button>
+      </div>
+    </div>
+  </section>
+  <section id="wager" class="panel-wrap hidden">
+    <div class="panel">
+      <p class="kicker">floor 6</p>
+      <h2>Optional wager</h2>
+      <p>Three lanes under this hall. Harder lanes pay more. The stairs up are on this floor, not down there.</p>
+      <ul class="controls">
+        <li>Short — a few spikes, 8 coins.</li>
+        <li>Harsh — spikes and a pit, 16 coins.</li>
+        <li>Brutal — more of both, 28 coins.</li>
+      </ul>
+      <button id="wager-close" type="button">Leave it</button>
+    </div>
+  </section>
+  <section id="intro" class="panel-wrap hidden intro">
+    <div class="intro-rain"></div>
+    <div class="intro-door"></div>
+    <p id="intro-line">The rain is louder than the street.</p>
+    <button id="intro-skip" type="button" class="hidden">Skip</button>
+    <button id="intro-go" type="button" class="hidden">Go in</button>
   </section>
   <section id="ending" class="panel-wrap hidden">
     <div class="panel">
@@ -129,9 +171,12 @@ let handlers: Handlers = {
   climb: () => undefined,
   buy: () => undefined,
   closeShop: () => undefined,
+  closeWager: () => undefined,
   resume: () => undefined,
   restart: () => undefined,
   flare: () => undefined,
+  applySeed: () => undefined,
+  replayIntro: () => undefined,
 };
 
 let toastTimer = 0;
@@ -165,6 +210,30 @@ $('shop-close').addEventListener('click', () => handlers.closeShop());
 $('resume').addEventListener('click', () => handlers.resume());
 $('again').addEventListener('click', () => handlers.restart());
 $('flare').addEventListener('click', () => handlers.flare());
+$('open-settings').addEventListener('click', () => ui.showSettings());
+$('pause-settings').addEventListener('click', () => ui.showSettings());
+$('set-close').addEventListener('click', () => ui.hideSettings());
+$('wager-close').addEventListener('click', () => handlers.closeWager());
+$('set-apply').addEventListener('click', () => {
+  const value = Number(($('set-seed') as HTMLInputElement).value);
+  if (Number.isFinite(value)) handlers.applySeed(Math.floor(value));
+});
+$('set-replay').addEventListener('click', () => handlers.replayIntro());
+$('set-bright').addEventListener('input', () => {
+  settings.brightness = Number(($('set-bright') as HTMLInputElement).value) / 100;
+  saveSettings(settings);
+});
+$('set-low').addEventListener('change', () => {
+  settings.lowEffects = ($('set-low') as HTMLInputElement).checked;
+  saveSettings(settings);
+  document.body.classList.toggle('low-fx', settings.lowEffects);
+});
+watchSettings((value) => {
+  ($('set-bright') as HTMLInputElement).value = String(Math.round(value.brightness * 100));
+  ($('set-low') as HTMLInputElement).checked = value.lowEffects;
+  if (value.seed != null) ($('set-seed') as HTMLInputElement).value = String(value.seed);
+  document.body.classList.toggle('low-fx', value.lowEffects);
+});
 $('mute').addEventListener('click', () => {
   const muted = toggleMute();
   $('mute').textContent = muted ? 'Muted' : 'Sound';
@@ -364,13 +433,14 @@ export const ui = {
   hideShop(): void {
     $('shop').classList.add('hidden');
   },
-  showPause(notes: EchoNote[]): void {
+  showPause(notes: EchoNote[], seed?: number): void {
     const journal = $('journal');
     if (notes.length === 0) {
       journal.innerHTML = '<p class="empty">No echoes yet. The paper is still where they left it.</p>';
     } else {
       journal.innerHTML = notes.map((note) => `<blockquote>Floor ${note.floor}. ${note.text}</blockquote>`).join('');
     }
+    $('pause-seed').textContent = seed == null ? '' : `Seed ${seed}`;
     $('pause').classList.remove('hidden');
   },
   hidePause(): void {
@@ -395,11 +465,76 @@ export const ui = {
       run.owned.silencer ? 'silencer' : '',
     ].filter(Boolean);
     const gear = names.length ? names.join(', ') : 'the gun you started with';
-    $('end-copy').textContent = `The flare gun is still on your belt. You kept ${gear}, ${run.notes.length} echoes, and ${run.coins} coins. The helicopter is not in this climb.`;
+    $('end-copy').textContent = `Above floor 8 the roof is still a rumor. The flare gun is on your belt. You kept ${gear}, ${run.notes.length} echoes, and ${run.coins} coins. Seed ${run.builtSeed ?? run.seed}.`;
     $('ending').classList.remove('hidden');
   },
+  showSettings(): void {
+    if (settings.seed != null) ($('set-seed') as HTMLInputElement).value = String(settings.seed);
+    $('settings').classList.remove('hidden');
+  },
+  hideSettings(): void {
+    $('settings').classList.add('hidden');
+  },
+  showWager(): void {
+    $('wager').classList.remove('hidden');
+  },
+  hideWager(): void {
+    $('wager').classList.add('hidden');
+  },
+  showIntro(allowSkip: boolean, onDone: () => void): void {
+    const timers: number[] = [];
+    const later = (ms: number, fn: () => void) => {
+      timers.push(window.setTimeout(fn, ms));
+    };
+    const intro = $('intro');
+    const line = $('intro-line');
+    const skip = $('intro-skip');
+    const go = $('intro-go');
+    $('menu').classList.add('hidden');
+    intro.classList.remove('hidden', 'slam', 'black', 'flash');
+    skip.classList.toggle('hidden', !allowSkip);
+    go.classList.add('hidden');
+    line.textContent = 'The rain is louder than the street.';
+    const rain = playClip('rain', 0.45, true);
+    const finish = () => {
+      for (const timer of timers) window.clearTimeout(timer);
+      stopClip(rain);
+      intro.classList.add('hidden');
+      onDone();
+    };
+    skip.onclick = finish;
+    go.onclick = finish;
+    later(2200, () => {
+      intro.classList.add('slam');
+      line.textContent = 'You get the door shut.';
+      playClip('door-slam', 0.7);
+    });
+    later(3200, () => {
+      intro.classList.add('black');
+      line.textContent = 'Then nothing.';
+    });
+    later(3600, () => {
+      intro.classList.add('flash');
+      line.textContent = 'Thunder. The tower answers.';
+      playClip('thunder', 0.55);
+      window.setTimeout(() => intro.classList.remove('flash'), 500);
+    });
+    later(4500, () => {
+      line.textContent = 'Something in the dark is awake.';
+      playClip('wail', 0.4);
+    });
+    later(6200, () => playClip('teeth', 0.35));
+    later(7600, () => {
+      playClip('scratch', 0.4);
+      line.textContent = 'It thins as you go further in.';
+    });
+    later(9400, () => {
+      go.classList.remove('hidden');
+      if (!allowSkip) skip.classList.add('hidden');
+    });
+  },
   hideOverlays(): void {
-    for (const id of ['menu', 'shop', 'pause', 'transition', 'ending']) {
+    for (const id of ['menu', 'shop', 'pause', 'transition', 'ending', 'settings', 'wager', 'intro']) {
       $(id).classList.add('hidden');
     }
   },

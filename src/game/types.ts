@@ -17,6 +17,8 @@ export interface EnemySpec {
   dormant?: boolean;
   behindDoor?: string;
   leash?: number;
+  /** Extra hit points on later floors. */
+  bonusHp?: number;
 }
 
 export interface NoteSpec {
@@ -65,6 +67,8 @@ export interface LightSpec {
   color: number;
   radius: number;
   flicker?: boolean;
+  /** A bulb that is still in the ceiling and does not light. */
+  dead?: boolean;
 }
 
 export interface LevelData {
@@ -94,4 +98,8 @@ export interface LevelData {
   checkpoints: { x: number; y: number }[];
   /** Every rect sends the player up a floor. Floor 2 has one per route. */
   exits: Rect[];
+  /** Floor 6 wager machine. The stairs up do not go through it. */
+  challenge?: { x: number; y: number } | null;
+  /** Seed that actually built a procedural floor, after any retry. */
+  builtSeed?: number;
 }

@@ -2,6 +2,8 @@ import type { CoinSpec, DoorSpec, EnemySpec, LevelData, LightSpec, MedkitSpec, N
 import { canReachExit } from './reach';
 import { mulberry32, pick } from './rng';
 import { takeNotes } from './notes';
+import { GEAR_IDS } from './gear';
+import { themeFor } from './palette';
 
 const SURFACE = 400;
 const FLOOR_H = 720;
@@ -24,6 +26,9 @@ interface Draft {
   noteSpots: { x: number; y: number }[];
   coinSpots: { x: number; y: number; amount?: number }[];
   medkitSpots: { x: number; y: number }[];
+  stoneSpots: { x: number; y: number }[];
+  gearSpots: { x: number; y: number }[];
+  steam: Rect[];
   enemySpans: { x: number; y: number; minX: number; maxX: number; behind?: string }[];
 }
 
@@ -46,6 +51,9 @@ function blank(): Draft {
     noteSpots: [],
     coinSpots: [],
     medkitSpots: [],
+    stoneSpots: [],
+    gearSpots: [],
+    steam: [],
     enemySpans: [],
   };
 }
@@ -178,6 +186,43 @@ function challengeHall(): Draft {
   return draft;
 }
 
+function steamHall(rng: () => number): Draft {
+  const draft = corridor(rng);
+  draft.steam.push({ x: draft.width * 0.45, y: SURFACE - 48, w: 36, h: 48 });
+  draft.signs.push({ x: draft.width * 0.45, y: SURFACE - 70, text: 'STEAM' });
+  draft.lights.push({ x: draft.width * 0.45, y: SURFACE - 110, color: 0x8fbfa4, radius: 50, flicker: true });
+  return draft;
+}
+
+function grate(): Draft {
+  const draft = blank();
+  draft.width = 480;
+  draft.platforms.push(slab(0, SURFACE, 90), slab(150, SURFACE, 70), slab(280, SURFACE, 70), slab(400, SURFACE, 80));
+  draft.pits.push({ x: 90, y: SURFACE + 20, w: 60, h: 80 }, { x: 220, y: SURFACE + 20, w: 60, h: 80 }, { x: 350, y: SURFACE + 20, w: 50, h: 80 });
+  draft.signs.push({ x: 40, y: SURFACE - 28, text: 'GRATE' });
+  draft.lights.push({ x: 240, y: SURFACE - 100, color: 0x7aa0c4, radius: 40, dead: true });
+  return draft;
+}
+
+function blackout(rng: () => number): Draft {
+  const draft = corridor(rng);
+  for (const light of draft.lights) light.dead = true;
+  draft.signs.push({ x: 80, y: SURFACE - 36, text: 'BULBS OUT' });
+  draft.enemySpans.push({ x: draft.width * 0.7, y: SURFACE, minX: 30, maxX: draft.width - 30 });
+  return draft;
+}
+
+function alarmHall(): Draft {
+  const draft = blank();
+  draft.width = 440;
+  draft.platforms.push(slab(0, SURFACE, draft.width));
+  draft.signs.push({ x: 200, y: SURFACE - 48, text: 'GUNSHOTS WAKE THE WARD' });
+  draft.enemySpans.push({ x: 300, y: SURFACE, minX: 180, maxX: 400, behind: undefined });
+  draft.enemySpans.push({ x: 140, y: SURFACE, minX: 40, maxX: 220 });
+  draft.lights.push({ x: 220, y: SURFACE - 100, color: 0xc45a4a, radius: 40, flicker: true });
+  return draft;
+}
+
 function exitHall(): Draft {
   const draft = blank();
   draft.width = 280;
@@ -185,7 +230,20 @@ function exitHall(): Draft {
   return draft;
 }
 
-type ChunkKind = 'corridor' | 'spikes' | 'pit' | 'ladder' | 'vent' | 'door' | 'crumble' | 'shop' | 'note';
+type ChunkKind =
+  | 'corridor'
+  | 'spikes'
+  | 'pit'
+  | 'ladder'
+  | 'vent'
+  | 'door'
+  | 'crumble'
+  | 'shop'
+  | 'note'
+  | 'steam'
+  | 'grate'
+  | 'blackout'
+  | 'alarm';
 
 function buildChunk(kind: ChunkKind, rng: () => number, floor: number, doorSerial: number): Draft {
   if (kind === 'spikes') return spikes(rng, floor);
@@ -196,6 +254,10 @@ function buildChunk(kind: ChunkKind, rng: () => number, floor: number, doorSeria
   if (kind === 'crumble') return crumbleDrop();
   if (kind === 'shop') return shopAlcove();
   if (kind === 'note') return noteNook();
+  if (kind === 'steam') return steamHall(rng);
+  if (kind === 'grate') return grate();
+  if (kind === 'blackout') return blackout(rng);
+  if (kind === 'alarm') return alarmHall();
   return corridor(rng);
 }
 
@@ -245,6 +307,18 @@ function shiftDraft(draft: Draft, dx: number, dy: number): void {
     spot.x += dx;
     spot.y += dy;
   }
+  for (const spot of draft.stoneSpots) {
+    spot.x += dx;
+    spot.y += dy;
+  }
+  for (const spot of draft.gearSpots) {
+    spot.x += dx;
+    spot.y += dy;
+  }
+  for (const jet of draft.steam) {
+    jet.x += dx;
+    jet.y += dy;
+  }
   for (const span of draft.enemySpans) {
     span.x += dx;
     span.y += dy;
@@ -264,26 +338,31 @@ interface Budget {
 }
 
 function budgetFor(floor: number): Budget {
+  const climb = floor - 4;
   return {
-    undead: 2 + (floor - 4),
-    ferrets: Math.max(0, floor - 4),
-    macaws: floor >= 6 ? (floor >= 8 ? 2 : 1) : 0,
-    bonusHp: floor >= 8 ? 2 : floor >= 7 ? 1 : 0,
-    medkits: floor >= 7 ? 0 : 1,
-    coinPiles: Math.max(1, 6 - (floor - 4)),
-    spendLimit: Math.max(8, 28 - (floor - 4) * 4),
+    undead: Math.min(8, 2 + climb),
+    ferrets: Math.min(4, Math.max(0, climb)),
+    macaws: floor < 6 ? 0 : floor >= 14 ? 3 : floor >= 8 ? 2 : 1,
+    bonusHp: floor >= 8 ? Math.min(4, 2 + Math.floor((floor - 8) / 2)) : floor >= 7 ? 1 : 0,
+    medkits: floor >= 12 ? 0 : floor >= 7 ? 0 : 1,
+    coinPiles: Math.max(1, 6 - Math.floor(climb / 2)),
+    spendLimit: floor <= 8 ? Math.max(8, 28 - climb * 4) : Math.max(10, 22 - (floor - 9) * 2),
   };
 }
 
 function chooseKinds(floor: number, rng: () => number): ChunkKind[] {
-  const count = 5 + (floor - 4);
+  const count = Math.min(9, 5 + (floor - 4));
   const bag: ChunkKind[] = ['corridor', 'spikes', 'pit', 'ladder', 'vent', 'door', 'crumble', 'note', 'shop'];
+  if (floor >= 9) bag.push('steam', 'grate', 'blackout', 'alarm');
   const kinds: ChunkKind[] = ['corridor'];
   if (floor >= 4) kinds.push('ladder');
   if (floor >= 5) kinds.push('spikes');
   if (floor >= 6) kinds.push('pit');
   if (floor >= 7) kinds.push('door');
   if (floor >= 8) kinds.push('crumble');
+  if (floor >= 9) kinds.push('steam');
+  if (floor >= 11) kinds.push('blackout');
+  if (floor >= 13) kinds.push('grate');
   while (kinds.length < count) kinds.push(pick(rng, bag));
   return kinds;
 }
@@ -326,6 +405,9 @@ function assemble(floor: number, seed: number, seen: ReadonlySet<string>): Level
     merged.lights.push(...part.lights);
     merged.noteSpots.push(...part.noteSpots);
     merged.coinSpots.push(...part.coinSpots);
+    merged.stoneSpots.push(...part.stoneSpots);
+    merged.gearSpots.push(...part.gearSpots);
+    merged.steam.push(...part.steam);
     merged.enemySpans.push(...part.enemySpans);
     if (part.crumble && !merged.crumble) merged.crumble = part.crumble;
     if (part.shop && !merged.shop) merged.shop = part.shop;
@@ -354,6 +436,15 @@ function assemble(floor: number, seed: number, seen: ReadonlySet<string>): Level
 
   const medkits: MedkitSpec[] = [];
   if (budget.medkits > 0) medkits.push({ x: 260, y: SURFACE, heal: 2 });
+
+  if (merged.stoneSpots.length === 0 && rng() > 0.25) merged.stoneSpots.push({ x: 420, y: SURFACE });
+  if (merged.gearSpots.length === 0) merged.gearSpots.push({ x: 560, y: SURFACE });
+  const stones = merged.stoneSpots.map((spot) => ({ x: spot.x, y: spot.y }));
+  const gear = merged.gearSpots.slice(0, 2).map((spot) => ({
+    x: spot.x,
+    y: spot.y,
+    id: pick(rng, GEAR_IDS),
+  }));
 
   const enemies: EnemySpec[] = [];
   const spans = merged.enemySpans.filter((span) => span.maxX - span.minX > 70);
@@ -400,7 +491,15 @@ function assemble(floor: number, seed: number, seen: ReadonlySet<string>): Level
 
   const width = Math.max(800, cursorX + 40);
   const height = Math.max(FLOOR_H, surface + 280);
-  const enter = ['The air thins', 'More of them', 'A wager, if you want', 'No kindness left', 'The last halls'][floor - 4] ?? 'Higher';
+  const theme = themeFor(floor);
+  const enter =
+    floor === 16
+      ? 'A locked hatch. The roof stays shut.'
+      : theme === 'machine'
+        ? 'Machinery, and no one running it'
+        : theme === 'ward'
+          ? 'A ward that was emptied in a hurry'
+          : (['The air thins', 'More of them', 'A wager, if you want', 'No kindness left', 'The last halls'][floor - 4] ?? 'Higher');
 
   return {
     id: floor,
@@ -419,6 +518,10 @@ function assemble(floor: number, seed: number, seen: ReadonlySet<string>): Level
     notes: noteSpecs,
     coins,
     medkits,
+    stones,
+    gear,
+    steam: merged.steam,
+    theme,
     shop: merged.shop,
     terminals: merged.terminals,
     doors: merged.doors,
@@ -454,6 +557,10 @@ function plainFloor(floor: number, seed: number, seen: ReadonlySet<string>): Lev
     notes,
     coins: [{ x: 360, y: SURFACE, amount: 3 }],
     medkits: floor >= 7 ? [] : [{ x: 600, y: SURFACE, heal: 2 }],
+    stones: [{ x: 480, y: SURFACE }],
+    gear: [{ x: 800, y: SURFACE, id: 'bandage' }],
+    steam: floor >= 9 ? [{ x: 900, y: SURFACE - 48, w: 36, h: 48 }] : [],
+    theme: themeFor(floor),
     shop: null,
     terminals: [],
     doors: [],

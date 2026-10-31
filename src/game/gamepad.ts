@@ -43,6 +43,8 @@ export interface PadReading {
   interact: boolean;
   pause: boolean;
   flare: boolean;
+  /** View / Back. Opens the pack. */
+  gear: boolean;
   up: boolean;
   down: boolean;
 }
@@ -80,6 +82,7 @@ export function readStandardPad(sample: PadSample): PadReading {
     interact: down(buttons, PAD.B),
     pause: down(buttons, PAD.START),
     flare: down(buttons, PAD.LB),
+    gear: down(buttons, PAD.BACK),
     up,
     down: downY,
   };
@@ -111,6 +114,7 @@ export function emptyPad(): PadReading {
     interact: false,
     pause: false,
     flare: false,
+    gear: false,
     up: false,
     down: false,
   };

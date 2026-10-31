@@ -1,15 +1,32 @@
 import Phaser from 'phaser';
 
-function canvas(scene: Phaser.Scene, key: string, w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void): void {
-  if (scene.textures.exists(key)) return;
-  const tex = scene.textures.createCanvas(key, w, h);
-  if (!tex) return;
-  const ctx = tex.getContext();
-  draw(ctx);
-  tex.refresh();
-}
+/** One sheet for every sprite, so the phone binds a single texture. */
+export const ATLAS = 'atlas';
 
 export function createTextures(scene: Phaser.Scene): void {
+  if (scene.textures.exists(ATLAS)) return;
+  const tex = scene.textures.createCanvas(ATLAS, 256, 256);
+  if (!tex) return;
+  const ctx = tex.getContext();
+  ctx.clearRect(0, 0, 256, 256);
+  let cursorX = 0;
+  let cursorY = 0;
+  let rowH = 0;
+
+  const canvas = (_scene: Phaser.Scene, key: string, w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void): void => {
+    if (cursorX + w > 256) {
+      cursorX = 0;
+      cursorY += rowH;
+      rowH = 0;
+    }
+    ctx.save();
+    ctx.translate(cursorX, cursorY);
+    draw(ctx);
+    ctx.restore();
+    tex.add(key, 0, cursorX, cursorY, w, h);
+    cursorX += w;
+    rowH = Math.max(rowH, h);
+  };
   canvas(scene, 'player', 32, 48, (ctx) => {
     ctx.fillStyle = '#14161c';
     ctx.fillRect(10, 16, 12, 18);
@@ -159,4 +176,21 @@ export function createTextures(scene: Phaser.Scene): void {
     ctx.fillStyle = '#d7a15f';
     ctx.fillRect(10, 30, 2, 4);
   });
+
+  canvas(scene, 'stone', 14, 12, (ctx) => {
+    ctx.fillStyle = '#6a6458';
+    ctx.fillRect(1, 3, 12, 7);
+    ctx.fillStyle = '#c4b49a';
+    ctx.fillRect(2, 4, 8, 2);
+  });
+
+  canvas(scene, 'gear', 14, 14, (ctx) => {
+    ctx.fillStyle = '#2a3140';
+    ctx.fillRect(1, 1, 12, 12);
+    ctx.fillStyle = '#d7a15f';
+    ctx.fillRect(6, 2, 2, 10);
+    ctx.fillRect(2, 6, 10, 2);
+  });
+
+  tex.refresh();
 }

@@ -1,4 +1,7 @@
 import { MAG_SIZE, PLAYER_MAX_HP, START_COINS, START_MAG, START_RESERVE } from './balance';
+import { emptyLoadout, type GearCarrier, type GearId, type Loadout } from './gear';
+import { KNIFE_MAX } from './knife';
+import { emptyBuffs, type Buffs } from './powerups';
 import { settings } from './settings';
 
 export interface OwnedUpgrades {
@@ -37,9 +40,14 @@ export interface RunState {
   crumbled: boolean;
   reloadTaught: boolean;
   gearWarned: Record<number, boolean>;
-  /** Requested procedural seed. Floors 4–8 may retry upward if a layout fails. */
+  /** Requested procedural seed. Floors 4 and up may retry upward if a layout fails. */
   seed: number;
   builtSeed?: number;
+  /** 0 is a ruined edge, 100 is fresh. */
+  knife: number;
+  bag: Partial<Record<GearId, number>>;
+  loadout: Loadout;
+  buffs: Buffs;
 }
 
 export function createRun(): RunState {
@@ -61,7 +69,15 @@ export function createRun(): RunState {
     reloadTaught: false,
     gearWarned: {},
     seed: settings.seed ?? Math.floor(Math.random() * 900000) + 1,
+    knife: KNIFE_MAX,
+    bag: {},
+    loadout: emptyLoadout(),
+    buffs: emptyBuffs(),
   };
+}
+
+export function asCarrier(run: RunState): GearCarrier {
+  return run;
 }
 
 /** 1 with the starting kit, plus one for each installed gun upgrade. */

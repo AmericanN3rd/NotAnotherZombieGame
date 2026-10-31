@@ -1,6 +1,6 @@
 # NAZG (Not Another Zombie Game)
 
-A playable prototype of the first three floors of a 2D horror platformer. You climb a dead tower alone. Notes are the only voices. The flare gun stays on your belt for a roof that this build does not reach.
+A playable prototype of a 2D horror platformer. You climb a dead tower alone, through floor 16, where a hatch stays shut. Notes are the only voices. You never meet anyone alive.
 
 ## Why Phaser 3, TypeScript, and Vite
 
@@ -38,6 +38,7 @@ Install on a phone:
 3. If Android asks, allow **Install unknown apps** for that browser.
 4. Open the downloaded file and install it.
 5. To update, download the newer APK and install it over the old one. That only works when both files were signed with the same key. A debug-signed build will not update a release-signed build, or the other way around.
+6. **v0.1.0 will not update in place.** That APK was signed with the CI runner's own debug key. Uninstall it once, then install v0.2.0. Debug builds from v0.2.0 on share `android/app/debug.keystore` (the public Android debug alias `androiddebugkey`), so later debug APKs install over each other.
 
 On launch, if the phone is online, the app tries to read `version.json` from the latest release. A private asset refuses that anonymous request, so the check fails silently and the game just starts. If a newer version is readable, a prompt opens the release page in the browser.
 
@@ -48,7 +49,7 @@ A release-signed APK needs these Actions secrets (the keystore never belongs in 
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
 
-If any of them are missing, the workflow builds a debug-signed APK instead and names it `NAZG-<version>-debug.apk`.
+If any of them are missing, the workflow builds a debug-signed APK instead and names it `NAZG-<version>-debug.apk`. That debug APK is signed with the committed debug keystore, not a fresh key from the runner. The store password and key password are Android's public debug defaults (`android` / `androiddebugkey`). They are not a release secret. Do not commit a release keystore.
 
 ## Controls
 
@@ -63,24 +64,66 @@ Keyboard, touch, and a standard-layout gamepad (the Xbox mapping in the browser 
 | Shoot | K or Z | Fire | RT |
 | Reload | R | Reload | Y or RB |
 | Use | E or F | Use | B |
-| Flare | G or 3 | Flare on the HUD | LB (a reminder; it still does not fire) |
+| Flare | G or 3 | Flare on the HUD | LB (fires a bought shell, otherwise a reminder) |
+| Pack | I or C | Pack | View |
 | Pause | Esc or P, or Android back | — | Menu |
-| Shop rows | 1–4 | tap a row | Stick or D-pad, A buys, B backs out |
+| Shop rows | 1–8 | tap a row | Stick or D-pad, A buys, B backs out |
+| Pack rows | click | tap Wear or a slot | A wears, X uses the health item, B closes |
 | Menus | click | tap | A confirms, B backs out, Menu toggles pause |
 
 Aim a little up or down with W/S, the touch stick, or the left stick while you fire, as long as you are not climbing. Pushing the stick up does not jump; A does.
 
 Touch controls show on coarse pointers, narrow windows, or `?touch=1`, and hide again once a pad is the active input.
 
-Gunshots are loud and pull nearby undead. The knife is silent. Reload is a moving bar: press reload again in the green band for a clean reload, press outside it and the gun jams, or let the bar finish for a slow safe reload. That second press is the same button on a pad as the first. Notes are picked up by walking over them. B / E holds the lock bypass and opens the cache. The flare gun is carried and does not fire.
+Gunshots are loud and pull nearby undead. A hard landing does too, unless you bought Rubber Soles for that floor. The knife is silent, and it dulls. A sharp knife hits. A worn knife sometimes glances. A dull knife mostly glances and swings slower. A sharpening stone, found or bought, puts the edge back. A pipe does not dull. A hatchet hits harder and dulls faster.
+
+Reload is a moving bar: press reload again in the green band for a clean reload, press outside it and the gun jams, or let the bar finish for a slow safe reload. Steady Hands widens the green band for the floor. Gun Oil makes a bad tap do nothing instead of jamming. That second press is the same button on a pad as the first. Notes are picked up by walking over them. B / E holds the lock bypass and opens the cache. The flare gun fires only after you buy a Flare Shell. One shell stuns whatever is close, then it is gone.
 
 ## Floors
 
-1. **Quiet.** A ward with something that sleeps until you shoot, the line “they’re inside, be careful.”, the line “I can’t wake up.”, and the first vending cache. The wallet starts at 36 coins (a stand-in for Recon earnings). This floor will only sell 30 coins of gear: pistol rounds, compensator, power, or a silencer.
+1. **Quiet.** A ward with something that sleeps until you shoot, the line “they’re inside, be careful.”, the line “I can’t wake up.”, and the first vending cache. A jacket and a sharpening stone are on the floor. The wallet starts at 36 coins (a stand-in for Recon earnings). This floor will only sell 30 coins of gear.
 2. **Two ways up.** Spikes and pits along the maintenance hall, with no undead. A vent is faster and ends at a computer lock. Bypass it and the undead (and a ferret) on the other side wake up.
 3. **Hollow floors.** More undead, ferrets, and a macaw that screams and calls bigger threats. Ladders start here. A crumbled span drops you to the bottom of the floor; you keep your gear, then climb out.
-4–8. **Generated.** Hand-authored chunks (corridors, spike runs, pits, ladder shafts, vents, locks, crumble drops, shops, note nooks) are chained from a seed. Difficulty ticks up each floor: more and tougher undead, denser traps, fewer medkits and coins. From floor 4, a ladder slips if an undead is close. The pause screen shows the seed that built the floor; Settings can lock one for testing, and `window.__nazg.setSeed(n)` does the same. Floor 8 ends on another “to be continued.”
+4–8. **Generated tenement.** Hand-authored chunks (corridors, spike runs, pits, ladder shafts, vents, locks, crumble drops, shops, note nooks) are chained from a seed. Difficulty ticks up each floor: more and tougher undead, denser traps, fewer medkits and coins. From floor 4, a ladder slips if an undead is close. The pause screen shows the seed that built the floor; Settings can lock one for testing, and `window.__nazg.setSeed(n)` does the same.
 6. **Wager.** A vending machine offers three optional lanes under the hall. Harder lanes pay more coins. The stairs up stay on the main floor.
+9–12. **Ward.** The same generator, in a green emptied ward. New chunks: steam that scalds on a cycle, a blackout with dead bulbs, and an alarm hall. Spend limits keep falling. Medkits are gone by 12.
+13–16. **Machinery.** Colder light, grate jumps, and the same rising pressure, capped so a floor does not become a maze. Floor 16 ends at a locked hatch. The roof is still not a level. There is no base camp, no one to recruit, and no one alive.
+
+## Vending cache
+
+Every machine still has a per-floor spend limit. Rounds and a sharpening stone are always for sale. Gun parts (compensator, power, silencer) stay until you own them. On top of that, each floor stocks three powers chosen from the climb seed. The same seed always stocks the same three. Prices rise about 12% per floor.
+
+| Power | Effect |
+| --- | --- |
+| Steady Hands | Wider reload window for this floor |
+| Gun Oil | A mistimed reload tap does not jam, this floor |
+| Hollow Points | Shots deal +1 damage, this floor |
+| Sharpened Knife | The blade counts as sharp, wears half as fast, and deals +1, this floor |
+| Rubber Soles | Hard landings make no noise, this floor |
+| Birdseed | Macaws ignore you for 12 seconds |
+| Ferret Bait | Ferrets ignore you for 12 seconds |
+| Adrenaline Shot | Heal 2 and move faster for 8 seconds |
+| Flare Shell | Kept until fired. Stuns enemies within reach |
+| Lucky Coin | Kept until the next hit, which then deals nothing |
+
+Floor buffs clear when you take the stairs. Shells and lucky charges stay in your pocket.
+
+## Pack
+
+Helmet, armor, weapon, and a health item. Open it with Pack, I, or View on a pad. Found gear goes in the bag until you wear it. Tap a worn slot to take it off.
+
+| Slot | Items |
+| --- | --- |
+| Helmet | Cloth wrap (longer i-frames), scavenged helm (one point off a hit every 6 seconds), riot visor (macaws cannot hurt you) |
+| Armor | Lined jacket or scrap plate (hits deal 1 less, and still at least 1; plate also slows you), trauma vest (+1 max health) |
+| Weapon | Knife (starts here), hatchet (harder, dulls faster), pipe (longer reach, no edge to lose) |
+| Health | Bandage heals 1, stim heals 2 and sprints, field kit heals 3. Using it spends one. |
+
+## Phone performance
+
+On a headless Chrome window at 1280×720, floor 8 (10 undead) went from 34 fps to 41 fps with effects on, and from 47 fps to 60 fps with low effects. The worst frame in low effects dropped from 33 ms to 17 ms. Floor 12 held 42 fps with effects and 60 with low effects.
+
+Low effects now skips the grain, the vignette pulse, the thunder, the dust, and the Phaser light layer, and it culls enemies a little tighter. The flashlight cone stays. Bullets are pooled instead of created and destroyed. Steady bulbs are drawn once. Gunshot noise reuses one buffer: 400 shots of 8000 samples cost 13.8 ms when allocated each time and about 0.01 ms from the cache. A full light redraw of 80 bulbs for 400 frames cost 3.28 ms; drawing the steady bulbs once and only the flickering ones after that cost 1.42 ms. Sprites share one texture atlas.
 
 The first time you climb, a short intro plays: rain, the door, thunder, then the tower answering. After that it can be skipped, or replayed from Settings. Brightness and a low-effects toggle live there too.
 
@@ -92,8 +135,8 @@ CC0 audio is listed in `AUDIO_CREDITS.md`. A dedicated teeth-grinding take was n
 
 - Recon mode, and any multiplayer session that would fill the coin wallet for real
 - Switch split-screen co-op
-- Floors 4–6, unsafe ladders, and the pet-store sanctuary
-- The roof, the working flare gun, and both helicopter endings
+- Floors past the locked hatch, the pet-store sanctuary, and a working helicopter
+- A release keystore in GitHub Actions secrets (debug builds already share one debug key)
 - Real art and recorded audio (shapes, and a small synthesizer, on purpose)
 
 Developer hooks exist in `npm run dev` and on `?debug=1`: `window.__nazg.goto(floor)`, `.place(x, y)`, `.pos()`, `.kill()`, `.fill()`, `.coins(n)`.

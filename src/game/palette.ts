@@ -21,6 +21,24 @@ const PALETTES: FloorPalette[] = [
   { bg: '#050506', wall: 0x080808, floor: 0x101012, lip: 0x3a1818, lamp: 0xe07070, fog: '#100808' },
 ];
 
+const WARD: FloorPalette[] = [
+  { bg: '#07110e', wall: 0x081410, floor: 0x10201a, lip: 0x2a4a3c, lamp: 0x8fbfa4, fog: '#0c1612' },
+  { bg: '#0a1210', wall: 0x0c1612, floor: 0x14241c, lip: 0x345848, lamp: 0xb7d4c4, fog: '#101a16' },
+];
+
+const MACHINE: FloorPalette[] = [
+  { bg: '#07090e', wall: 0x0a0e16, floor: 0x121820, lip: 0x2a3848, lamp: 0x7aa0c4, fog: '#10141c' },
+  { bg: '#0c0e10', wall: 0x101418, floor: 0x181c22, lip: 0x3a4048, lamp: 0xc4b49a, fog: '#14181c' },
+];
+
+export function themeFor(floor: number): 'tenement' | 'ward' | 'machine' {
+  if (floor >= 13) return 'machine';
+  if (floor >= 9) return 'ward';
+  return 'tenement';
+}
+
 export function paletteFor(floor: number): FloorPalette {
+  if (floor >= 13) return MACHINE[(floor - 13) % MACHINE.length] ?? MACHINE[0]!;
+  if (floor >= 9) return WARD[(floor - 9) % WARD.length] ?? WARD[0]!;
   return PALETTES[Math.min(PALETTES.length, Math.max(1, floor)) - 1] ?? PALETTES[0]!;
 }

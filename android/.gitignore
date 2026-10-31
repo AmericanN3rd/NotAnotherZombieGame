@@ -52,9 +52,10 @@ captures/
 # Comment next line if keeping position of elements in Navigation Editor is relevant for you
 .idea/navEditor.xml
 
-# Keystore files. Never commit a release key.
+# Release keystores stay untracked. The debug key is Android's public debug credential and is committed.
 *.jks
 *.keystore
+!app/debug.keystore
 
 # External native build folder generated in Android Studio 2.2 and later
 .externalNativeBuild

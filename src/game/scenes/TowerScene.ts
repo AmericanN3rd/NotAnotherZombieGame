@@ -2,19 +2,22 @@ import Phaser from 'phaser';
 import { playClip, sfx, startAmbience, unlockAudio } from '../audio';
 import { paletteFor } from '../palette';
 import { saveSettings, settings } from '../settings';
-import { BULLET_SPEED, GRAVITY, IFRAME_TIME, MACAW_NOISE, MELEE_DAMAGE, MELEE_REACH } from '../balance';
-import { createTextures } from '../textures';
+import { BULLET_SPEED, GRAVITY, IFRAME_TIME, MACAW_NOISE, ROOF_FLOOR } from '../balance';
+import { ATLAS, createTextures } from '../textures';
 import { Enemy } from '../entities/enemy';
 import { Player } from '../entities/player';
 import { input } from '../input';
 import { getLevel } from '../levels';
-import { beginReload, idleReload, JAM_DURATION, reloadProgress, tickReload, type ReloadState } from '../reload';
+import { RELOAD_WINDOW, beginReload, idleReload, JAM_DURATION, reloadProgress, tickReload, type ReloadState } from '../reload';
 import { attemptPurchase, type ItemId } from '../shop';
+import { clearFloorBuffs, STEADY_WINDOW } from '../powerups';
+import { GEAR_IDS, clearSlot as dropSlot, equip, gearDef, grantGear, iframeBonus, incomingDamage, slotLabel, speedScale, useHealthItem, type GearId, type Slot } from '../gear';
+import { hone, strike, type MeleeWeapon } from '../knife';
 import { bulletSpread, createRun, gearLevel, noiseRadius, recoilScale, type RunState } from '../state';
 import type { LevelData, Rect } from '../types';
 import { ui } from '../../ui/ui';
 
-type Phase = 'menu' | 'play' | 'shop' | 'wager' | 'pause' | 'transition' | 'down' | 'ending';
+type Phase = 'menu' | 'play' | 'shop' | 'wager' | 'pause' | 'gear' | 'transition' | 'down' | 'ending';
 
 interface LiveDoor {
   id: string;
@@ -31,14 +34,16 @@ interface LiveTerminal {
 }
 
 interface LivePickup {
-  kind: 'note' | 'coin' | 'medkit';
+  kind: 'note' | 'coin' | 'medkit' | 'stone' | 'gear';
   rect: Rect;
   sprite: Phaser.GameObjects.Sprite;
   id?: string;
   text?: string;
   amount?: number;
   heal?: number;
+  gearId?: GearId;
   taken: boolean;
+  bob: number;
 }
 
 function overlaps(body: Phaser.Physics.Arcade.Body, rect: Rect, pad = 0): boolean {
@@ -87,7 +92,13 @@ export class TowerScene extends Phaser.Scene {
   private collapsed = false;
   private groundCollider!: Phaser.Physics.Arcade.Collider;
   private bullets!: Phaser.Physics.Arcade.Group;
+  private spareBullets: Phaser.Physics.Arcade.Sprite[] = [];
   private reload: ReloadState = idleReload();
+  private helmCd = 0;
+  private steamT = 0;
+  private hudClock = 0;
+  private staticLights!: Phaser.GameObjects.Graphics;
+  private flickerLights: LevelData['lights'] = [];
   private stepAcc = 0;
   private aimUp = false;
   private aimDown = false;
@@ -118,7 +129,7 @@ export class TowerScene extends Phaser.Scene {
     this.reload = idleReload();
     this.transitioning = false;
 
-    if (!this.textures.exists('player')) createTextures(this);
+    if (!this.textures.exists(ATLAS)) createTextures(this);
     this.build();
   }
 
@@ -157,8 +168,11 @@ export class TowerScene extends Phaser.Scene {
     }
 
     this.lightsGfx = this.add.graphics().setDepth(4).setBlendMode(Phaser.BlendModes.ADD);
+    this.staticLights = this.add.graphics().setDepth(4).setBlendMode(Phaser.BlendModes.ADD);
     this.flashGfx = this.add.graphics().setDepth(20).setBlendMode(Phaser.BlendModes.ADD);
     this.lightDefs = this.level.lights;
+    this.flickerLights = this.level.lights.filter((light) => light.flicker && !light.dead);
+    this.paintStaticLights();
 
     const palette = paletteFor(this.level.id);
     this.cameras.main.setBackgroundColor(palette.bg);
@@ -187,9 +201,12 @@ export class TowerScene extends Phaser.Scene {
         ui.hideOverlays();
         this.scene.restart({ fresh: true });
       },
-      flare: () => {
-        if (this.phase === 'play') ui.toast('The flare gun is for the roof.');
-      },
+      flare: () => this.tryFlare(),
+      openGear: () => this.openGear(),
+      closeGear: () => this.closeGear(),
+      equip: (id) => this.wear(id),
+      clearSlot: (slot) => this.takeOff(slot),
+      useHealth: () => this.useHealth(),
     });
 
     const debug = import.meta.env.DEV || new URLSearchParams(location.search).has('debug');
@@ -237,6 +254,19 @@ export class TowerScene extends Phaser.Scene {
         },
         seed: () => this.run.builtSeed ?? this.run.seed,
         setSeed: (seed: number) => this.applySeed(seed),
+        openShop: () => this.openShop(),
+        openGear: () => this.openGear(),
+        setKnife: (n: number) => {
+          this.run.knife = n;
+          this.syncHud();
+        },
+        setHp: (n: number) => {
+          this.run.hp = n;
+          this.syncHud();
+        },
+        give: (id: string) => {
+          if ((GEAR_IDS as string[]).includes(id)) grantGear(this.run, id as GearId);
+        },
       };
     }
 
@@ -263,12 +293,12 @@ export class TowerScene extends Phaser.Scene {
         settings.introSeen = true;
         saveSettings(settings);
         this.begin();
-        startAmbience();
+        if (!settings.lowEffects) startAmbience();
       });
       return;
     }
     this.begin();
-    startAmbience();
+    if (!settings.lowEffects) startAmbience();
   }
 
   private applySeed(seed: number): void {
@@ -281,6 +311,11 @@ export class TowerScene extends Phaser.Scene {
   }
 
   private mood(dt: number): void {
+    document.body.classList.toggle('low-fx', settings.lowEffects);
+    this.hudClock += dt;
+    const stride = settings.lowEffects ? 0.12 : 0.05;
+    if (this.hudClock < stride) return;
+    this.hudClock = 0;
     const canvas = this.game.canvas.getBoundingClientRect();
     const cam = this.cameras.main;
     const scaleX = canvas.width / cam.width;
@@ -290,20 +325,22 @@ export class TowerScene extends Phaser.Scene {
     const root = document.documentElement;
     root.style.setProperty('--lx', `${lx}px`);
     root.style.setProperty('--ly', `${ly}px`);
-    const dark = 0.94 - settings.brightness * 0.5;
-    root.style.setProperty('--dark', dark.toFixed(3));
-    let threat = 1 - this.run.hp / this.run.maxHp;
-    for (const enemy of this.enemies) {
-      if (enemy.dead) continue;
-      const dist = Math.hypot(enemy.sprite.x - this.player.sprite.x, enemy.sprite.y - this.player.sprite.y);
-      threat = Math.max(threat, Math.max(0, 1 - dist / 190));
-    }
-    const vignette = document.getElementById('vignette');
-    vignette?.style.setProperty('--threat', threat.toFixed(3));
-    vignette?.classList.toggle('pulse', threat > 0.42 && !settings.lowEffects);
-    document.body.classList.toggle('low-fx', settings.lowEffects);
     if (!settings.lowEffects) {
-      this.storm -= dt;
+      const dark = 0.94 - settings.brightness * 0.5;
+      root.style.setProperty('--dark', dark.toFixed(3));
+      let threat = 1 - this.run.hp / this.run.maxHp;
+      const px = this.player.sprite.x;
+      const py = this.player.sprite.y;
+      for (const enemy of this.enemies) {
+        if (enemy.dead || !enemy.sprite.visible) continue;
+        const dist = Math.hypot(enemy.sprite.x - px, enemy.sprite.y - py);
+        if (dist > 190) continue;
+        threat = Math.max(threat, 1 - dist / 190);
+      }
+      const vignette = document.getElementById('vignette');
+      vignette?.style.setProperty('--threat', threat.toFixed(3));
+      vignette?.classList.toggle('pulse', threat > 0.42);
+      this.storm -= stride;
       if (this.storm <= 0) {
         this.storm = 14 + Math.random() * 16;
         document.getElementById('lightning')?.classList.add('flash');
@@ -311,8 +348,7 @@ export class TowerScene extends Phaser.Scene {
         window.setTimeout(() => document.getElementById('lightning')?.classList.remove('flash'), 160);
       }
       for (const mote of this.dust) {
-        mote.y -= 6 * dt;
-        mote.x += Math.sin(mote.y * 0.02) * 8 * dt;
+        mote.y -= 6 * stride;
         if (mote.y < cam.scrollY - 20) {
           mote.y = cam.scrollY + cam.height + 10;
           mote.x = cam.scrollX + Math.random() * cam.width;
@@ -382,16 +418,32 @@ export class TowerScene extends Phaser.Scene {
     this.drawLights(time);
     this.drawFlash();
 
+    if (frame.gearEdge && (this.phase === 'play' || this.phase === 'pause')) {
+      this.openGear();
+      return;
+    }
     if (this.routeMenus(frame)) return;
-    if (frame.flareEdge && this.phase === 'play') ui.toast('The flare gun is for the roof.');
+    if (frame.flareEdge && this.phase === 'play') this.tryFlare();
 
     if (this.phase !== 'play') return;
 
     this.mood(dt);
+    this.tickBuffs(dt);
     this.slipLadders();
     this.groundCollider.active = !this.player.climbing;
     const ladder = this.ladderUnder();
-    const stepped = this.player.update(frame, dt, ladder != null, ladder ? ladder.x + ladder.w / 2 : null, this.floors);
+    const stepped = this.player.update(
+      frame,
+      dt,
+      ladder != null,
+      ladder ? ladder.x + ladder.w / 2 : null,
+      this.floors,
+      speedScale(this.run.loadout, this.run.buffs.adrenaline),
+    );
+    if (this.player.landed > 0) {
+      if (!this.run.buffs.rubber) this.emitNoise(this.player.sprite.x, this.player.sprite.y, 150, 0.45);
+      this.player.landed = 0;
+    }
     if (stepped) {
       this.stepAcc += 1;
       if (this.stepAcc >= 1) {
@@ -428,9 +480,22 @@ export class TowerScene extends Phaser.Scene {
     return best;
   }
 
+  private meleeWeapon(): MeleeWeapon {
+    const id = this.run.loadout.weapon;
+    if (id === 'hatchet' || id === 'pipe') return id;
+    return 'knife';
+  }
+
   private tryMelee(): void {
     if (this.player.meleeCd > 0) return;
-    this.player.meleeCd = 0.42;
+    const blow = strike({
+      durability: this.run.knife,
+      weapon: this.meleeWeapon(),
+      sharpened: this.run.buffs.sharpened,
+      roll: Math.random(),
+    });
+    this.run.knife = blow.durability;
+    this.player.meleeCd = blow.cooldown;
     sfx.melee();
     const facing = this.player.facing;
     const cx = this.player.sprite.x + facing * 24;
@@ -441,13 +506,14 @@ export class TowerScene extends Phaser.Scene {
       if (enemy.dead) continue;
       const point = enemy.eye;
       const touching = rectsTouch(this.player.body, enemy.body);
-      const inArc = Math.hypot(point.x - cx, point.y - cy) <= MELEE_REACH + 8;
+      const inArc = Math.hypot(point.x - cx, point.y - cy) <= blow.reach + 8;
       if (!touching && !inArc) continue;
       if (!touching && this.wallBetween(this.player.sprite.x, cy, point.x, point.y)) continue;
-      enemy.hurt(MELEE_DAMAGE, facing);
+      if (blow.damage > 0) enemy.hurt(blow.damage, facing);
       hit = true;
     }
-    if (hit) {
+    if (blow.glanced) ui.toast(this.run.knife < 30 ? 'The knife is dull.' : 'The edge skates off.');
+    if (hit && blow.damage > 0) {
       sfx.hit();
       this.cameras.main.shake(40, 0.002);
     }
@@ -486,17 +552,27 @@ export class TowerScene extends Phaser.Scene {
   private spawnBullet(angle: number): void {
     const x = this.player.sprite.x + Math.cos(angle) * 18;
     const y = this.player.sprite.y - 22 + Math.sin(angle) * 10;
-    const bullet = this.bullets.create(x, y, 'bullet') as Phaser.Physics.Arcade.Sprite;
-    bullet.setDepth(16);
+    let bullet = this.spareBullets.pop();
+    if (!bullet) {
+      bullet = this.bullets.create(x, y, ATLAS, 'bullet') as Phaser.Physics.Arcade.Sprite;
+      bullet.setDepth(16);
+    } else {
+      bullet.enableBody(true, x, y, true, true);
+    }
     bullet.setActive(true);
     bullet.setVisible(true);
     const body = bullet.body as Phaser.Physics.Arcade.Body;
     body.setAllowGravity(false);
     body.setSize(8, 8);
     bullet.setVelocity(Math.cos(angle) * BULLET_SPEED, Math.sin(angle) * BULLET_SPEED);
-    bullet.setData('dmg', this.run.gunDamage);
+    bullet.setData('dmg', this.run.gunDamage + (this.run.buffs.hollow ? 1 : 0));
     bullet.setData('life', 0.95);
     bullet.setRotation(angle);
+  }
+
+  private releaseBullet(bullet: Phaser.Physics.Arcade.Sprite): void {
+    bullet.disableBody(true, true);
+    this.spareBullets.push(bullet);
   }
 
   private tickBullets(dt: number): void {
@@ -506,7 +582,7 @@ export class TowerScene extends Phaser.Scene {
       const life = (bullet.getData('life') as number) - dt;
       bullet.setData('life', life);
       if (life <= 0) {
-        bullet.destroy();
+        this.releaseBullet(bullet);
         continue;
       }
       const body = bullet.body as Phaser.Physics.Arcade.Body;
@@ -515,7 +591,7 @@ export class TowerScene extends Phaser.Scene {
         if (rectsTouch(body, enemy.body)) {
           enemy.hurt(bullet.getData('dmg') as number, Math.sign(body.velocity.x) || this.player.facing);
           sfx.hit();
-          bullet.destroy();
+          this.releaseBullet(bullet);
           break;
         }
       }
@@ -527,7 +603,10 @@ export class TowerScene extends Phaser.Scene {
       this.startReload();
       return;
     }
-    const result = tickReload(this.reload, dt, tap && this.reload.phase !== 'idle');
+    const result = tickReload(this.reload, dt, tap && this.reload.phase !== 'idle', {
+      window: this.run.buffs.steady ? STEADY_WINDOW : RELOAD_WINDOW,
+      oil: this.run.buffs.oil,
+    });
     this.reload = result.state;
     if (result.event === 'perfect' || result.event === 'normal') {
       this.fillMag();
@@ -540,7 +619,8 @@ export class TowerScene extends Phaser.Scene {
       ui.toast('Jammed.');
       this.cameras.main.shake(140, 0.007);
     }
-    if (this.reload.phase === 'active') ui.setReload(reloadProgress(this.reload), false);
+    const sweet = this.run.buffs.steady ? STEADY_WINDOW : RELOAD_WINDOW;
+    if (this.reload.phase === 'active') ui.setReload(reloadProgress(this.reload), false, sweet);
     else if (this.reload.phase === 'jammed') ui.setReload(1 - this.reload.t / JAM_DURATION, true);
     else ui.setReload(null, false);
   }
@@ -570,7 +650,19 @@ export class TowerScene extends Phaser.Scene {
   private tickEnemies(dt: number): void {
     const px = this.player.sprite.x;
     const py = this.player.sprite.y;
+    const cam = this.cameras.main.worldView;
+    const margin = settings.lowEffects ? 48 : 96;
     for (const enemy of this.enemies) {
+      const near =
+        enemy.sprite.x > cam.x - margin &&
+        enemy.sprite.x < cam.right + margin &&
+        enemy.sprite.y > cam.y - margin &&
+        enemy.sprite.y < cam.bottom + margin;
+      enemy.sprite.setVisible(near);
+      if (!near) {
+        if (!enemy.dead) enemy.body.setVelocity(0, enemy.body.velocity.y);
+        continue;
+      }
       const event = enemy.update(dt, px, py, this.floors, this.blocks);
       if (!enemy.dead && enemy.sprite.y > this.level.height) enemy.hurt(99, 1);
       if (event.screech) {
@@ -583,7 +675,7 @@ export class TowerScene extends Phaser.Scene {
         enemy.touchCd = 0.75;
         const sign = Math.sign(this.player.sprite.x - enemy.sprite.x);
         const dir = sign !== 0 ? sign : enemy.sprite.flipX ? -1 : 1;
-        this.hurtPlayer(1, dir);
+        this.hurtPlayer(1, dir, enemy.kind === 'macaw' ? 'macaw' : 'bite');
       }
     }
   }
@@ -598,7 +690,7 @@ export class TowerScene extends Phaser.Scene {
       }
     }
     for (const spike of this.spikes) {
-      if (overlaps(body, spike)) this.hurtPlayer(1, this.player.facing * -1 || -1);
+      if (overlaps(body, spike)) this.hurtPlayer(1, this.player.facing * -1 || -1, 'hazard');
     }
 
     for (const pickup of this.pickups) {
@@ -620,6 +712,23 @@ export class TowerScene extends Phaser.Scene {
         this.run.hp = Math.min(this.run.maxHp, this.run.hp + pickup.heal);
         this.floatText(pickup.rect.x, pickup.rect.y, 'stitched', '#d7cbb8');
         sfx.pickup();
+      } else if (pickup.kind === 'stone') {
+        this.run.knife = hone(this.run.knife);
+        this.floatText(pickup.rect.x, pickup.rect.y, 'honed', '#d7cbb8');
+        sfx.pickup();
+      } else if (pickup.kind === 'gear' && pickup.gearId) {
+        grantGear(this.run, pickup.gearId);
+        this.floatText(pickup.rect.x, pickup.rect.y, 'packed', '#d7a15f');
+        ui.toast(`${gearDef(pickup.gearId).name} is in the pack.`);
+        sfx.pickup();
+      }
+    }
+
+    this.steamT += dt;
+    const steamOn = this.steamT % 2.8 < 1.1;
+    if (steamOn) {
+      for (const jet of this.level.steam ?? []) {
+        if (overlaps(body, jet)) this.hurtPlayer(1, 0, 'hazard');
       }
     }
 
@@ -727,8 +836,83 @@ export class TowerScene extends Phaser.Scene {
     ui.hideShop();
   }
 
+  private openGear(): void {
+    if (this.phase !== 'play' && this.phase !== 'pause') return;
+    this.phase = 'gear';
+    this.physics.pause();
+    ui.hidePause();
+    ui.setPrompt(null);
+    ui.showGear(this.run);
+  }
+
+  private closeGear(): void {
+    if (this.phase !== 'gear') return;
+    this.phase = 'play';
+    this.physics.resume();
+    ui.hideGear();
+  }
+
+  private wear(id: GearId): void {
+    const result = equip(this.run, id);
+    ui.gearMessage(result.ok ? 'Worn.' : (result.reason ?? 'No.'));
+    ui.refreshGear(this.run);
+    this.syncHud();
+  }
+
+  private takeOff(slot: Slot): void {
+    if (slot === 'weapon' && !this.run.loadout.weapon) return;
+    dropSlot(this.run, slot);
+    ui.refreshGear(this.run);
+    this.syncHud();
+  }
+
+  private useHealth(): void {
+    const result = useHealthItem(this.run);
+    if (!result.ok) {
+      ui.toast(result.reason ?? 'Nothing to use.');
+      return;
+    }
+    if (result.sprint > 0) this.run.buffs.adrenaline = Math.max(this.run.buffs.adrenaline, result.sprint);
+    ui.toast(result.sprint > 0 ? 'The stim hits.' : 'You bind the wound.');
+    if (this.phase === 'gear') ui.refreshGear(this.run);
+    this.syncHud();
+  }
+
+  private tryFlare(): void {
+    if (this.phase !== 'play') return;
+    if (this.run.buffs.flareShells <= 0) {
+      ui.toast('The flare gun is empty.');
+      return;
+    }
+    this.run.buffs.flareShells -= 1;
+    const x = this.player.sprite.x;
+    const y = this.player.sprite.y;
+    for (const enemy of this.enemies) {
+      if (enemy.dead) continue;
+      if (Math.hypot(enemy.sprite.x - x, enemy.sprite.y - y) < 220) enemy.stun = 2.4;
+    }
+    this.cameras.main.flash(180, 255, 220, 160);
+    sfx.gun(false);
+    this.emitNoise(x, y, 200, 0.8);
+    ui.toast('The flare spends a shell.');
+    this.syncHud();
+  }
+
+  private tickBuffs(dt: number): void {
+    if (this.run.buffs.adrenaline > 0) this.run.buffs.adrenaline -= dt;
+    if (this.run.buffs.birdseed > 0) this.run.buffs.birdseed -= dt;
+    if (this.run.buffs.ferret > 0) this.run.buffs.ferret -= dt;
+    if (this.helmCd > 0) this.helmCd -= dt;
+  }
+
   private buy(id: ItemId): void {
     const result = attemptPurchase(this.run, id, this.level.spendLimit);
+    if (result.ok && id === 'birdseed') {
+      for (const enemy of this.enemies) if (enemy.kind === 'macaw') enemy.bait = this.run.buffs.birdseed;
+    }
+    if (result.ok && id === 'ferret') {
+      for (const enemy of this.enemies) if (enemy.kind === 'ferret') enemy.bait = this.run.buffs.ferret;
+    }
     ui.shopMessage(result.ok ? 'Taken from the cache.' : (result.reason ?? 'No.'));
     if (result.ok) sfx.pickup();
     else sfx.dry();
@@ -740,7 +924,7 @@ export class TowerScene extends Phaser.Scene {
    * Pad menus share A / B / Menu with jump, use, and pause.
    * Handled before gameplay so a confirm doesn't also fire a shot.
    */
-  private routeMenus(frame: { jumpEdge: boolean; interactEdge: boolean; pauseEdge: boolean; navEdge: -1 | 0 | 1 }): boolean {
+  private routeMenus(frame: { jumpEdge: boolean; interactEdge: boolean; pauseEdge: boolean; meleeEdge: boolean; navEdge: -1 | 0 | 1 }): boolean {
     const pad = input.device === 'pad';
     if (pad && this.phase === 'menu' && (frame.jumpEdge || frame.pauseEdge)) {
       this.begin();
@@ -761,6 +945,13 @@ export class TowerScene extends Phaser.Scene {
       if (frame.interactEdge || frame.pauseEdge || frame.jumpEdge) this.closeWager();
       return true;
     }
+    if (pad && this.phase === 'gear') {
+      if (frame.navEdge !== 0) ui.nudgeGear(frame.navEdge);
+      if (frame.jumpEdge) ui.confirmGear();
+      if (frame.meleeEdge) this.useHealth();
+      if (frame.interactEdge || frame.pauseEdge) this.closeGear();
+      return true;
+    }
     if (pad && this.phase === 'pause' && (frame.jumpEdge || frame.interactEdge)) {
       this.closePause();
       return true;
@@ -774,6 +965,10 @@ export class TowerScene extends Phaser.Scene {
   }
 
   private onPause(): void {
+    if (this.phase === 'gear') {
+      this.closeGear();
+      return;
+    }
     if (this.phase === 'shop') {
       this.closeShop();
       return;
@@ -795,10 +990,22 @@ export class TowerScene extends Phaser.Scene {
     ui.hidePause();
   }
 
-  private hurtPlayer(amount: number, dir: number): void {
-    if (this.phase !== 'play' || this.player.iframes > 0) return;
-    this.run.hp -= amount;
-    this.player.iframes = IFRAME_TIME;
+  private hurtPlayer(amount: number, dir: number, source: 'bite' | 'macaw' | 'hazard' = 'bite'): void {
+    if (this.phase !== 'play' || this.player.iframes > 0 || amount <= 0) return;
+    const hit = incomingDamage(amount, this.run.loadout, source, this.helmCd <= 0, this.run.buffs.lucky);
+    if (hit.luckyUsed) {
+      this.run.buffs.lucky -= 1;
+      ui.toast('The coin spends itself.');
+      this.player.iframes = 0.35;
+      return;
+    }
+    if (hit.helmUsed) this.helmCd = 6;
+    if (hit.damage <= 0) {
+      this.player.iframes = 0.25;
+      return;
+    }
+    this.run.hp -= hit.damage;
+    this.player.iframes = IFRAME_TIME + iframeBonus(this.run.loadout);
     this.player.body.setVelocity(dir * 170, -160);
     sfx.hurt();
     ui.flashHurt();
@@ -827,10 +1034,11 @@ export class TowerScene extends Phaser.Scene {
 
   private gotoFloor(next: number): void {
     if (this.transitioning || (this.phase !== 'play' && this.phase !== 'menu')) return;
-    if (next > 8) {
+    if (next > ROOF_FLOOR) {
       this.ending();
       return;
     }
+    clearFloorBuffs(this.run.buffs);
     this.transitioning = true;
     this.phase = 'transition';
     this.physics.pause();
@@ -888,12 +1096,18 @@ export class TowerScene extends Phaser.Scene {
       hp: this.run.hp,
       maxHp: this.run.maxHp,
       mag: this.run.mag,
+      magSize: this.run.magSize,
       reserve: this.run.reserve,
       coins: this.run.coins,
+      knife: this.run.knife,
       silenced: this.run.owned.silencer,
       power: this.run.owned.power,
       compensated: this.run.owned.compensator,
       notes: this.run.notes.length,
+      flareShells: this.run.buffs.flareShells,
+      helmet: this.run.loadout.helmet ?? '',
+      armor: this.run.loadout.armor ?? '',
+      weapon: slotLabel(this.run.loadout, 'weapon'),
     });
   }
 
@@ -1022,51 +1236,74 @@ export class TowerScene extends Phaser.Scene {
 
   private placeProps(): void {
     for (const note of this.level.notes) {
-      const sprite = this.add.sprite(note.x, note.y, 'note').setOrigin(0.5, 1).setDepth(8);
-      this.tweens.add({ targets: sprite, y: note.y - 3, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+      const sprite = this.add.sprite(note.x, note.y, ATLAS, 'note').setOrigin(0.5, 1).setDepth(8);
       this.pickups.push({
         kind: 'note',
         sprite,
         id: note.id,
         text: note.text,
         taken: false,
+        bob: note.x,
         rect: { x: note.x - 12, y: note.y - 28, w: 24, h: 30 },
       });
     }
     for (const coin of this.level.coins) {
-      const sprite = this.add.sprite(coin.x, coin.y - 16, 'coin').setDepth(8);
-      this.tweens.add({ targets: sprite, angle: 20, duration: 700, yoyo: true, repeat: -1 });
+      const sprite = this.add.sprite(coin.x, coin.y - 16, ATLAS, 'coin').setDepth(8);
       this.pickups.push({
         kind: 'coin',
         sprite,
         amount: coin.amount,
         taken: false,
+        bob: coin.x,
         rect: { x: coin.x - 12, y: coin.y - 32, w: 24, h: 28 },
       });
     }
     for (const kit of this.level.medkits) {
-      const sprite = this.add.sprite(kit.x, kit.y, 'medkit').setOrigin(0.5, 1).setDepth(8);
+      const sprite = this.add.sprite(kit.x, kit.y, ATLAS, 'medkit').setOrigin(0.5, 1).setDepth(8);
       this.pickups.push({
         kind: 'medkit',
         sprite,
         heal: kit.heal,
         taken: false,
+        bob: kit.x,
         rect: { x: kit.x - 12, y: kit.y - 24, w: 24, h: 26 },
+      });
+    }
+    for (const stone of this.level.stones ?? []) {
+      const sprite = this.add.sprite(stone.x, stone.y, ATLAS, 'stone').setOrigin(0.5, 1).setDepth(8);
+      this.pickups.push({
+        kind: 'stone',
+        sprite,
+        taken: false,
+        bob: stone.x,
+        rect: { x: stone.x - 12, y: stone.y - 20, w: 24, h: 22 },
+      });
+    }
+    for (const item of this.level.gear ?? []) {
+      if (!(GEAR_IDS as readonly string[]).includes(item.id)) continue;
+      const sprite = this.add.sprite(item.x, item.y, ATLAS, 'gear').setOrigin(0.5, 1).setDepth(8);
+      this.pickups.push({
+        kind: 'gear',
+        sprite,
+        gearId: item.id as GearId,
+        taken: false,
+        bob: item.x,
+        rect: { x: item.x - 12, y: item.y - 22, w: 24, h: 24 },
       });
     }
     if (this.level.shop) {
       const shop = this.level.shop;
-      this.add.sprite(shop.x, shop.y, 'vending').setOrigin(0.5, 1).setDepth(8);
+      this.add.sprite(shop.x, shop.y, ATLAS, 'vending').setOrigin(0.5, 1).setDepth(8);
       this.shopRect = { x: shop.x - 28, y: shop.y - 64, w: 60, h: 68 };
     }
     if (this.level.challenge) {
       const machine = this.level.challenge;
-      const sprite = this.add.sprite(machine.x, machine.y, 'vending').setOrigin(0.5, 1).setDepth(8);
+      const sprite = this.add.sprite(machine.x, machine.y, ATLAS, 'vending').setOrigin(0.5, 1).setDepth(8);
       sprite.setTint(0xe0b15a);
       this.challengeRect = { x: machine.x - 30, y: machine.y - 66, w: 64, h: 70 };
     }
     if (!settings.lowEffects) {
-      for (let i = 0; i < 22; i++) {
+      for (let i = 0; i < 8; i++) {
         const mote = this.add.circle(Math.random() * this.level.width, Math.random() * this.level.height, 1.2, 0xcbb892, 0.28);
         mote.setDepth(19);
         this.dust.push(mote);
@@ -1077,7 +1314,7 @@ export class TowerScene extends Phaser.Scene {
       this.add.rectangle(light.x, light.y, 7, 4, 0x121212).setDepth(3);
     }
     for (const terminal of this.level.terminals) {
-      this.add.sprite(terminal.x, terminal.y, 'terminal').setOrigin(0.5, 1).setDepth(8);
+      this.add.sprite(terminal.x, terminal.y, ATLAS, 'terminal').setOrigin(0.5, 1).setDepth(8);
       const bar = this.add.rectangle(terminal.x, terminal.y - 40, 4, 4, 0x9cbc6a).setOrigin(0, 0.5).setDepth(9);
       bar.setVisible(false);
       this.terminals.push({
@@ -1100,25 +1337,40 @@ export class TowerScene extends Phaser.Scene {
     }
   }
 
+  private paintStaticLights(): void {
+    const g = this.staticLights;
+    if (!g) return;
+    g.clear();
+    if (settings.lowEffects) return;
+    for (const light of this.lightDefs) {
+      if (light.dead || light.flicker) continue;
+      g.fillStyle(light.color, 0.045);
+      g.fillCircle(light.x, light.y, light.radius * 0.8);
+    }
+  }
+
   private drawLights(time: number): void {
     const g = this.lightsGfx;
     if (!g) return;
-    g.clear();
-    for (const light of this.lightDefs) {
-      if (light.dead) continue;
-      const flick = light.flicker && !settings.lowEffects ? 0.45 + Math.sin(time / 90 + light.x) * 0.55 : 1;
-      g.fillStyle(light.color, 0.055 * flick);
-      g.fillCircle(light.x, light.y, light.radius);
+    if (settings.lowEffects) {
+      if (g.visible) g.setVisible(false);
+      if (this.staticLights?.visible) this.staticLights.setVisible(false);
+      if (this.flashGfx?.visible) this.flashGfx.setVisible(false);
+      return;
     }
-    if (this.player) {
-      g.fillStyle(0xffe2b0, 0.05);
-      g.fillCircle(this.player.sprite.x, this.player.sprite.y - 20, 70);
+    if (!g.visible) g.setVisible(true);
+    g.clear();
+    for (const light of this.flickerLights) {
+      const flick = 0.45 + Math.sin(time / 90 + light.x) * 0.35;
+      g.fillStyle(light.color, 0.05 * flick);
+      g.fillCircle(light.x, light.y, light.radius * 0.75);
     }
   }
 
   private drawFlash(): void {
     const g = this.flashGfx;
     if (!g || !this.player) return;
+    if (settings.lowEffects) return;
     g.clear();
     const dir = this.player.facing;
     const x = this.player.sprite.x + dir * 8;

@@ -31,3 +31,6 @@ export const MACAW_NOISE = 340;
 export const BULLET_SPEED = 460;
 
 export const FLOOR_1_SPEND_LIMIT = 30;
+
+/** The stair above this floor is a locked hatch. Generation still runs through it. */
+export const ROOF_FLOOR = 16;

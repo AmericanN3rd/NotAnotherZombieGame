@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { groundAt, segmentBlocked } from '../geom';
+import { ATLAS } from '../textures';
 import type { EnemyKind, EnemySpec, Rect } from '../types';
 
 interface KindStats {
@@ -71,6 +72,10 @@ export class Enemy {
   alert = false;
   dead = false;
   touchCd = 0;
+  /** Seconds left ignoring the player. Birdseed and ferret bait set this. */
+  bait = 0;
+  /** Seconds left unable to move. A flare shell sets this. */
+  stun = 0;
   private readonly stats: KindStats;
   private readonly homeX: number;
   private readonly homeY: number;
@@ -98,7 +103,7 @@ export class Enemy {
     this.heardX = spec.x;
     this.patrolDir = Math.random() < 0.5 ? -1 : 1;
 
-    this.sprite = scene.physics.add.sprite(spec.x, spec.y, this.stats.texture);
+    this.sprite = scene.physics.add.sprite(spec.x, spec.y, ATLAS, this.stats.texture);
     this.sprite.setOrigin(0.5, this.stats.originY);
     this.sprite.setDepth(12);
     this.sprite.setCollideWorldBounds(true);
@@ -155,9 +160,19 @@ export class Enemy {
   update(dt: number, playerX: number, playerY: number, floors: Rect[], blocks: Rect[]): { screech: boolean } {
     if (this.dead) return { screech: false };
     this.touchCd = Math.max(0, this.touchCd - dt);
+    if (this.bait > 0) {
+      this.bait -= dt;
+      this.alert = false;
+    }
+    if (this.stun > 0) {
+      this.stun -= dt;
+      this.alert = false;
+      this.body.setVelocity(0, this.stats.flying ? 0 : this.body.velocity.y);
+      return { screech: false };
+    }
     if (this.sprite.y > 4000) this.die();
 
-    const sees = this.awake && this.sees(playerX, playerY, blocks);
+    const sees = this.bait <= 0 && this.awake && this.sees(playerX, playerY, blocks);
     if (sees) {
       this.alert = true;
       this.heardX = playerX;

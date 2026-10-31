@@ -7,6 +7,9 @@
 let ctx: AudioContext | null = null;
 let muted = false;
 let drone: { osc: OscillatorNode; gain: GainNode } | null = null;
+const noiseCache = new Map<string, AudioBuffer>();
+const clipCache = new Map<string, AudioBuffer>();
+const clipLoads = new Map<string, Promise<void>>();
 
 function context(): AudioContext | null {
   if (muted) return null;
@@ -23,17 +26,18 @@ export function unlockAudio(): void {
   const c = context();
   if (!c) return;
   if (!drone) startDrone(c);
+  for (const name of CLIP_NAMES) void loadClip(c, name);
 }
 
 export function toggleMute(): boolean {
   muted = !muted;
   if (muted) {
     drone?.gain.gain.setTargetAtTime(0, ctx?.currentTime ?? 0, 0.05);
-    for (const bed of beds) bed.volume = 0;
+    for (const bed of beds) bed.pause();
   } else {
     unlockAudio();
     if (drone && ctx) drone.gain.gain.setTargetAtTime(0.018, ctx.currentTime, 0.2);
-    for (const bed of beds) bed.volume = bed.dataset.volume ? Number(bed.dataset.volume) : 0.4;
+    // Beds were stopped with the mute. A new climb starts them again.
   }
   return muted;
 }
@@ -84,15 +88,23 @@ function tone(freq: number, duration: number, type: OscillatorType, peak: number
   o.stop(c.currentTime + duration + 0.02);
 }
 
-function noiseBurst(duration: number, peak: number, band: 'low' | 'high'): void {
-  const c = context();
-  if (!c) return;
-  const length = Math.floor(c.sampleRate * duration);
+function noiseBuffer(c: AudioContext, band: 'low' | 'high'): AudioBuffer {
+  const key = `${band}:${c.sampleRate}`;
+  const cached = noiseCache.get(key);
+  if (cached) return cached;
+  const length = Math.floor(c.sampleRate * (band === 'low' ? 0.4 : 0.18));
   const buffer = c.createBuffer(1, length, c.sampleRate);
   const data = buffer.getChannelData(0);
   for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+  noiseCache.set(key, buffer);
+  return buffer;
+}
+
+function noiseBurst(duration: number, peak: number, band: 'low' | 'high'): void {
+  const c = context();
+  if (!c) return;
   const src = c.createBufferSource();
-  src.buffer = buffer;
+  src.buffer = noiseBuffer(c, band);
   const filter = c.createBiquadFilter();
   filter.type = band === 'low' ? 'lowpass' : 'highpass';
   filter.frequency.value = band === 'low' ? 420 : 1800;
@@ -100,6 +112,7 @@ function noiseBurst(duration: number, peak: number, band: 'low' | 'high'): void 
   src.connect(filter);
   filter.connect(g);
   src.start();
+  src.stop(c.currentTime + duration);
 }
 
 export const sfx = {
@@ -156,26 +169,81 @@ export const sfx = {
 
 export type ClipName = 'rain' | 'thunder' | 'door-slam' | 'wail' | 'teeth' | 'scratch' | 'piano' | 'strings';
 
-const beds = new Set<HTMLAudioElement>();
-let pianoBed: HTMLAudioElement | null = null;
+const CLIP_NAMES: readonly ClipName[] = ['rain', 'thunder', 'door-slam', 'wail', 'teeth', 'scratch', 'piano', 'strings'];
+
+export interface ClipHandle {
+  pause(): void;
+}
+
+const beds = new Set<ClipHandle>();
+let pianoBed: ClipHandle | null = null;
 
 function clipUrl(name: ClipName): string {
   return `${import.meta.env.BASE_URL}audio/${name}.ogg`;
 }
 
-export function playClip(name: ClipName, volume = 0.45, loop = false): HTMLAudioElement | null {
+function loadClip(c: AudioContext, name: ClipName): Promise<void> {
+  const existing = clipLoads.get(name);
+  if (existing) return existing;
+  const job = fetch(clipUrl(name))
+    .then((response) => response.arrayBuffer())
+    .then((bytes) => c.decodeAudioData(bytes.slice(0)))
+    .then((buffer) => {
+      clipCache.set(name, buffer);
+    })
+    .catch(() => undefined);
+  clipLoads.set(name, job);
+  return job;
+}
+
+function playElement(name: ClipName, volume: number, loop: boolean): ClipHandle {
   const audio = new Audio(clipUrl(name));
   audio.loop = loop;
   audio.preload = 'auto';
-  audio.dataset.volume = String(volume);
   audio.volume = muted ? 0 : volume;
-  beds.add(audio);
-  if (!loop) audio.addEventListener('ended', () => beds.delete(audio));
+  const handle: ClipHandle = {
+    pause() {
+      audio.pause();
+      beds.delete(handle);
+    },
+  };
+  beds.add(handle);
+  if (!loop) audio.addEventListener('ended', () => beds.delete(handle));
   void audio.play().catch(() => undefined);
-  return audio;
+  return handle;
 }
 
-export function stopClip(audio: HTMLAudioElement | null): void {
+export function playClip(name: ClipName, volume = 0.45, loop = false): ClipHandle | null {
+  const c = context();
+  const buffer = c ? clipCache.get(name) : undefined;
+  if (!c || !buffer) {
+    if (c) void loadClip(c, name);
+    return playElement(name, volume, loop);
+  }
+  const src = c.createBufferSource();
+  src.buffer = buffer;
+  src.loop = loop;
+  const gain = c.createGain();
+  gain.gain.value = muted ? 0 : volume;
+  src.connect(gain);
+  gain.connect(c.destination);
+  src.start();
+  const handle: ClipHandle = {
+    pause() {
+      try {
+        src.stop();
+      } catch {
+        // Already stopped.
+      }
+      beds.delete(handle);
+    },
+  };
+  beds.add(handle);
+  if (!loop) src.onended = () => beds.delete(handle);
+  return handle;
+}
+
+export function stopClip(audio: ClipHandle | null): void {
   if (!audio) return;
   audio.pause();
   beds.delete(audio);

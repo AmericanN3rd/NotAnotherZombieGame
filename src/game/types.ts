@@ -102,4 +102,10 @@ export interface LevelData {
   challenge?: { x: number; y: number } | null;
   /** Seed that actually built a procedural floor, after any retry. */
   builtSeed?: number;
+  /** Whetstones. Missing on the hand-built floors that have none. */
+  stones?: { x: number; y: number }[];
+  gear?: { x: number; y: number; id: string }[];
+  /** Vents that scald on a cycle. */
+  steam?: Rect[];
+  theme?: 'tenement' | 'ward' | 'machine';
 }

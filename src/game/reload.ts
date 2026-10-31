@@ -27,7 +27,18 @@ export function beginReload(state: ReloadState): ReloadState {
   return { phase: 'active', t: 0 };
 }
 
-export function tickReload(state: ReloadState, dt: number, tap: boolean): { state: ReloadState; event: ReloadEvent } {
+export interface ReloadOpts {
+  window?: { start: number; end: number };
+  /** Gun Oil: a tap outside the window is ignored instead of jamming. */
+  oil?: boolean;
+}
+
+export function tickReload(
+  state: ReloadState,
+  dt: number,
+  tap: boolean,
+  opts?: ReloadOpts,
+): { state: ReloadState; event: ReloadEvent } {
   if (state.phase === 'idle') return { state, event: 'none' };
 
   if (state.phase === 'jammed') {
@@ -38,10 +49,12 @@ export function tickReload(state: ReloadState, dt: number, tap: boolean): { stat
   }
 
   if (tap) {
+    const window = opts?.window ?? RELOAD_WINDOW;
     const p = state.t / RELOAD_DURATION;
-    if (p >= RELOAD_WINDOW.start && p <= RELOAD_WINDOW.end) {
+    if (p >= window.start && p <= window.end) {
       return { state: idleReload(), event: 'perfect' };
     }
+    if (opts?.oil) return { state, event: 'none' };
     return { state: { phase: 'jammed', t: 0 }, event: 'jam' };
   }
 

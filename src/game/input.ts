@@ -18,11 +18,12 @@ export interface Frame {
   interactHeld: boolean;
   pauseEdge: boolean;
   flareEdge: boolean;
+  gearEdge: boolean;
   /** -1 up, +1 down, for shop and menu rows. */
   navEdge: -1 | 0 | 1;
 }
 
-const EDGE_KEYS = ['jump', 'melee', 'fire', 'reload', 'interact', 'pause', 'flare'] as const;
+const EDGE_KEYS = ['jump', 'melee', 'fire', 'reload', 'interact', 'pause', 'flare', 'gear'] as const;
 type EdgeName = (typeof EDGE_KEYS)[number];
 
 type PromptAction = 'jump' | 'melee' | 'fire' | 'reload' | 'interact' | 'pause' | 'climb';
@@ -55,6 +56,7 @@ export class Input {
     interact: false,
     pause: false,
     flare: false,
+    gear: false,
   };
 
   private scheme: Scheme;
@@ -148,6 +150,7 @@ export class Input {
       interactHeld: this.keyInteractHeld || this.pad.interact,
       pauseEdge: this.edges.pause,
       flareEdge: this.edges.flare,
+      gearEdge: this.edges.gear,
       navEdge,
     };
     for (const key of EDGE_KEYS) this.edges[key] = false;
@@ -212,6 +215,7 @@ export class Input {
     if (reading.interact && !was.interact) this.edges.interact = true;
     if (reading.pause && !was.pause) this.edges.pause = true;
     if (reading.flare && !was.flare) this.edges.flare = true;
+    if (reading.gear && !was.gear) this.edges.gear = true;
   }
 
   private adopt(next: Scheme): void {
@@ -289,6 +293,9 @@ function mapKey(code: string): 'left' | 'right' | 'up' | 'down' | EdgeName | nul
     case 'Digit3':
     case 'KeyG':
       return 'flare';
+    case 'KeyI':
+    case 'KeyC':
+      return 'gear';
     default:
       return null;
   }

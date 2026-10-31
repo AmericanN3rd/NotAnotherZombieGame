@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { CLIMB_SPEED, COYOTE_TIME, JUMP_BUFFER, JUMP_CUT, JUMP_VELOCITY, RUN_SPEED, STEP_UP } from '../balance';
+import { ATLAS } from '../textures';
 import type { Frame } from '../input';
 import type { Rect } from '../types';
 
@@ -15,12 +16,15 @@ export class Player {
   recoil = 0;
   /** Set when a nearby undead kicks the climber off. Blocks re-grab. */
   slipLock = 0;
+  /** Downward speed of the landing that just happened. Cleared by the scene. */
+  landed = 0;
+  private airVy = 0;
   private prevKeyUp = false;
   private walkT = 0;
   coyote = COYOTE_TIME;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
-    this.sprite = scene.physics.add.sprite(x, y, 'player');
+    this.sprite = scene.physics.add.sprite(x, y, ATLAS, 'player');
     this.sprite.setOrigin(0.5, 1);
     this.sprite.setDepth(14);
     this.sprite.setCollideWorldBounds(true);
@@ -46,7 +50,7 @@ export class Player {
    * Arcade physics steps before Scene.update, so velocities set here apply next frame.
    * Returns whether a footstep should play.
    */
-  update(frame: Frame, dt: number, onLadder: boolean, ladderX: number | null, floors: Rect[]): boolean {
+  update(frame: Frame, dt: number, onLadder: boolean, ladderX: number | null, floors: Rect[], speedScale = 1): boolean {
     const body = this.body;
     this.meleeCd = Math.max(0, this.meleeCd - dt);
     this.fireCd = Math.max(0, this.fireCd - dt);
@@ -101,10 +105,15 @@ export class Player {
     else this.jumpBuffer = Math.max(0, this.jumpBuffer - dt);
 
     const grounded = body.blocked.down || body.touching.down;
+    if (!grounded) this.airVy = Math.max(this.airVy, body.velocity.y);
+    else if (this.airVy > 640) {
+      this.landed = this.airVy;
+      this.airVy = 0;
+    } else this.airVy = 0;
     if (grounded && body.velocity.y >= 0) this.coyote = COYOTE_TIME;
     else this.coyote = Math.max(0, this.coyote - dt);
 
-    const target = frame.axisX * RUN_SPEED;
+    const target = frame.axisX * RUN_SPEED * speedScale;
     const rate = (grounded ? 2600 : 1450) * dt;
     const diff = target - body.velocity.x;
     body.setVelocityX(Math.abs(diff) <= rate ? target : body.velocity.x + Math.sign(diff) * rate);

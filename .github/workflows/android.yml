@@ -120,7 +120,7 @@ jobs:
           else
             src="android/app/build/outputs/apk/debug/app-debug.apk"
             name="NAZG-${version}-debug.apk"
-            note="DEBUG-SIGNED. This is for testing, not a Play Store build. Later release-signed APKs will not install over this one."
+            note="DEBUG-SIGNED with the committed debug.keystore (alias androiddebugkey). Later debug APKs install over this one. A release-signed APK will not. v0.1.0 used the runner's own debug key and will not update in place."
           fi
           cp "$src" "$name"
           echo "name=$name" >> "$GITHUB_OUTPUT"

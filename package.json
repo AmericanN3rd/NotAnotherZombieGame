@@ -1,8 +1,8 @@
 {
   "name": "nazg",
   "private": true,
-  "version": "0.1.0",
-  "description": "NAZG (Not Another Zombie Game) — floors 1–8, web and a private Android APK",
+  "version": "0.2.0",
+  "description": "NAZG (Not Another Zombie Game) — floors 1–16, web and a private Android APK",
   "type": "module",
   "scripts": {
     "dev": "vite",

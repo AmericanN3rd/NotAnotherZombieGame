@@ -11,6 +11,11 @@ interface NazgDebug {
   place: (x: number, y: number) => void;
   seed: () => number;
   setSeed: (seed: number) => void;
+  openShop: () => void;
+  openGear: () => void;
+  setKnife: (n: number) => void;
+  setHp: (n: number) => void;
+  give: (id: string) => void;
 }
 
 interface Window {

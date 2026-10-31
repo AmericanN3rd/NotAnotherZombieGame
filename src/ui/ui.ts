@@ -1,8 +1,10 @@
 import { isMuted, playClip, stopClip, toggleMute } from '../game/audio';
 import { RELEASE_PAGE } from '../game/updateCheck';
 import { saveSettings, settings, watchSettings } from '../game/settings';
+import { gearDef, slotLabel, type GearId, type Slot } from '../game/gear';
+import { knifeBand } from '../game/knife';
 import type { ItemId } from '../game/shop';
-import { SHOP_ITEMS, spentOn } from '../game/shop';
+import { offersFor, spentOn } from '../game/shop';
 import type { EchoNote, RunState } from '../game/state';
 import { input } from '../game/input';
 
@@ -11,12 +13,18 @@ export interface HudData {
   hp: number;
   maxHp: number;
   mag: number;
+  magSize: number;
   reserve: number;
   coins: number;
+  knife: number;
   silenced: boolean;
   power: boolean;
   compensated: boolean;
   notes: number;
+  flareShells: number;
+  helmet: string;
+  armor: string;
+  weapon: string;
 }
 
 interface Handlers {
@@ -29,6 +37,11 @@ interface Handlers {
   flare: () => void;
   applySeed: (seed: number) => void;
   replayIntro: () => void;
+  openGear: () => void;
+  closeGear: () => void;
+  equip: (id: GearId) => void;
+  clearSlot: (slot: Slot) => void;
+  useHealth: () => void;
 }
 
 const root = document.getElementById('ui');
@@ -37,26 +50,39 @@ if (!root) throw new Error('Missing #ui');
 root.innerHTML = `
   <button id="update-banner" type="button" class="hidden">Update available</button>
   <div id="hud">
-    <div class="hud-left">
+    <div class="hud-stack">
       <div id="floor-name">Floor 1</div>
-      <div id="hearts"></div>
+      <div class="meter">
+        <span>Vital</span>
+        <div class="track"><i id="hp-fill"></i></div>
+        <em id="hp-read">5</em>
+      </div>
+      <div class="meter">
+        <span>Mag</span>
+        <div class="track pips" id="ammo-pips"></div>
+        <em id="ammo-read">0</em>
+      </div>
+      <div class="meter">
+        <span>Knife</span>
+        <div class="track"><i id="knife-fill"></i></div>
+        <em id="knife-read">keen</em>
+      </div>
     </div>
     <div class="hud-right">
-      <button id="mute" type="button">Sound</button>
-      <div id="coins">0</div>
-      <div id="ammo">0 | 0</div>
-      <div id="kit">
-        <span class="kit-knife">knife</span>
-        <span id="kit-gun">pistol</span>
-        <button id="flare" type="button">flare</button>
+      <div class="hud-tools">
+        <button id="mute" type="button">Sound</button>
+        <button id="gear-open" type="button">Pack</button>
+        <button id="flare" type="button">Flare</button>
       </div>
+      <div id="coins">0 coins</div>
+      <div id="kit-gun">pistol</div>
       <div id="note-count">0 echoes</div>
     </div>
   </div>
   <div id="prompt"></div>
   <div id="toast"></div>
   <div id="echo"><span>echo</span><p></p></div>
-  <div id="pad-legend">A jump · X knife · RT fire · Y reload · B use · Menu pause</div>
+  <div id="pad-legend">A jump · X knife · RT fire · Y reload · B use · View pack · LB flare · Menu pause</div>
   <div id="reload" class="hidden">
     <div class="sweet"></div>
     <div class="needle"></div>
@@ -77,7 +103,7 @@ root.innerHTML = `
       <p class="kicker">a tower, already dead</p>
       <h1>NAZG</h1>
       <p class="sub">Not Another Zombie Game</p>
-      <p class="blurb">Floors 1–8. You never see anyone alive. The flare gun stays on your belt until the roof.</p>
+      <p class="blurb">Floors 1–16. You never see anyone alive. The hatch above 16 stays shut.</p>
       <button id="climb" type="button">Climb</button>
       <button id="open-settings" type="button" class="ghost">Settings</button>
       <ul class="controls">
@@ -99,6 +125,20 @@ root.innerHTML = `
       <p id="shop-msg"></p>
       <p id="shop-pad" class="pad-only">Stick or D-pad chooses. A buys. B steps back.</p>
       <button id="shop-close" type="button">Step back</button>
+    </div>
+  </section>
+  <section id="gear" class="panel-wrap hidden">
+    <div class="panel">
+      <p class="kicker">what you are wearing</p>
+      <h2>Pack</h2>
+      <div id="slots"></div>
+      <div id="bag"></div>
+      <p id="gear-msg"></p>
+      <p class="pad-only">Stick or D-pad chooses. A wears it. X uses the health item. B closes.</p>
+      <div class="setting-row">
+        <button id="use-health" type="button">Use health item</button>
+        <button id="gear-close" type="button" class="ghost">Close</button>
+      </div>
     </div>
   </section>
   <section id="pause" class="panel-wrap hidden">
@@ -125,7 +165,7 @@ root.innerHTML = `
       <label class="setting">Brightness <input id="set-bright" type="range" min="35" max="100" value="62" /></label>
       <label class="setting"><input id="set-low" type="checkbox" /> Low effects</label>
       <label class="setting">Seed <input id="set-seed" type="number" min="1" step="1" /></label>
-      <p class="empty">Floors 4–8 are built from this seed. The pause screen shows the seed that actually fit.</p>
+      <p class="empty">Floors 4 and up are built from this seed. The pause screen shows the seed that actually fit.</p>
       <div class="setting-row">
         <button id="set-apply" type="button">Apply seed</button>
         <button id="set-replay" type="button" class="ghost">Replay the door</button>
@@ -156,7 +196,7 @@ root.innerHTML = `
   <section id="ending" class="panel-wrap hidden">
     <div class="panel">
       <p class="kicker">to be continued</p>
-      <h2>The roof is above this landing.</h2>
+      <h2>The hatch will not open.</h2>
       <p id="end-copy"></p>
       <button id="again" type="button">Climb again</button>
     </div>
@@ -179,6 +219,11 @@ let handlers: Handlers = {
   flare: () => undefined,
   applySeed: () => undefined,
   replayIntro: () => undefined,
+  openGear: () => undefined,
+  closeGear: () => undefined,
+  equip: () => undefined,
+  clearSlot: () => undefined,
+  useHealth: () => undefined,
 };
 
 let toastTimer = 0;
@@ -189,6 +234,8 @@ input.watchScheme((scheme) => {
   document.body.classList.toggle('pad-active', scheme === 'pad');
   $('climb').textContent = scheme === 'pad' ? 'A · climb' : 'Climb';
   $('shop-close').textContent = scheme === 'pad' ? 'B · step back' : 'Step back';
+  $('gear-close').textContent = scheme === 'pad' ? 'B · close' : 'Close';
+  $('gear-open').textContent = scheme === 'pad' ? 'View' : 'Pack';
   $('resume').textContent = scheme === 'pad' ? 'A · keep climbing' : 'Keep climbing';
   $('again').textContent = scheme === 'pad' ? 'A · climb again' : 'Climb again';
   if (scheme === 'pad') applyShopSelection();
@@ -212,6 +259,9 @@ $('shop-close').addEventListener('click', () => handlers.closeShop());
 $('resume').addEventListener('click', () => handlers.resume());
 $('again').addEventListener('click', () => handlers.restart());
 $('flare').addEventListener('click', () => handlers.flare());
+$('gear-open').addEventListener('click', () => handlers.openGear());
+$('gear-close').addEventListener('click', () => handlers.closeGear());
+$('use-health').addEventListener('click', () => handlers.useHealth());
 $('open-settings').addEventListener('click', () => ui.showSettings());
 $('pause-settings').addEventListener('click', () => ui.showSettings());
 $('set-close').addEventListener('click', () => ui.hideSettings());
@@ -291,30 +341,25 @@ document.querySelectorAll<HTMLButtonElement>('#touch button').forEach((button) =
 window.addEventListener('keydown', (event) => {
   const shop = $('shop');
   if (shop.classList.contains('hidden')) return;
-  const map: Record<string, ItemId> = {
-    Digit1: 'ammo',
-    Digit2: 'compensator',
-    Digit3: 'power',
-    Digit4: 'silencer',
-  };
-  const item = map[event.code];
-  if (item) handlers.buy(item);
+  const index = Number(event.code.replace('Digit', '')) - 1;
+  if (!Number.isInteger(index) || index < 0) return;
+  const button = shopButtons()[index];
+  if (button && !button.disabled) button.click();
 });
 
 window.addEventListener('contextmenu', (event) => event.preventDefault());
 
 function renderShop(run: RunState, limit: number): void {
   const spent = spentOn(run, run.floor);
-  $('shop-wallet').textContent = `Coins ${run.coins}  ·  this floor ${spent}/${limit}. The wallet stands in for Recon earnings.`;
+  $('shop-wallet').textContent = `Coins ${run.coins} · this floor ${spent}/${limit}. Three powers, plus rounds and a stone.`;
   const list = $('shop-items');
   list.innerHTML = '';
-  SHOP_ITEMS.forEach((item, index) => {
-    const owned = !item.repeatable && item.id !== 'ammo' && run.owned[item.id];
+  offersFor(run).forEach((item, index) => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'shop-item';
-    button.disabled = owned;
-    button.innerHTML = `<span>${index + 1}. ${item.name}</span><span>${owned ? 'on the gun' : item.cost}</span><small>${item.detail}</small>`;
+    button.disabled = item.owned;
+    button.innerHTML = `<span>${index + 1}. ${item.name}</span><span>${item.owned ? 'owned' : item.cost}</span><small>${item.detail}</small>`;
     button.addEventListener('click', () => handlers.buy(item.id));
     list.appendChild(button);
   });
@@ -375,28 +420,41 @@ export const ui = {
   setHud(data: HudData): void {
     $('floor-name').textContent = data.floor;
     $('coins').textContent = `${data.coins} coins`;
-    $('ammo').textContent = `${data.mag} | ${data.reserve}`;
     $('note-count').textContent = `${data.notes} echoes`;
-    const hearts = $('hearts');
-    hearts.innerHTML = '';
-    for (let i = 0; i < data.maxHp; i++) {
-      const pip = document.createElement('i');
-      if (i >= data.hp) pip.className = 'off';
-      hearts.appendChild(pip);
+    const hp = Math.max(0, data.hp) / Math.max(1, data.maxHp);
+    $('hp-fill').style.transform = `scaleX(${hp})`;
+    $('hp-read').textContent = `${Math.max(0, data.hp)}/${data.maxHp}`;
+    const pips = $('ammo-pips');
+    if (pips.childElementCount !== data.magSize) {
+      pips.innerHTML = '';
+      for (let i = 0; i < data.magSize; i++) {
+        const pip = document.createElement('i');
+        pips.appendChild(pip);
+      }
     }
+    [...pips.children].forEach((pip, index) => pip.classList.toggle('off', index >= data.mag));
+    $('ammo-read').textContent = `${data.mag}+${data.reserve}`;
+    const knife = Math.max(0, Math.min(100, data.knife)) / 100;
+    const band = knifeBand(data.knife);
+    const knifeFill = $('knife-fill');
+    knifeFill.style.transform = `scaleX(${knife})`;
+    knifeFill.dataset.band = band;
+    $('knife-read').textContent = band === 'sharp' ? 'keen' : band;
     const gun = $('kit-gun');
-    const tags = ['pistol'];
+    const tags = [data.weapon === 'Knife' ? 'pistol' : data.weapon];
     if (data.power) tags.push('power');
     if (data.compensated) tags.push('comp');
     if (data.silenced) tags.push('quiet');
     gun.textContent = tags.join(' · ');
+    $('flare').textContent = data.flareShells > 0 ? `Flare ${data.flareShells}` : 'Flare';
+    $('flare').classList.toggle('armed', data.flareShells > 0);
   },
   setPrompt(text: string | null): void {
     const node = $('prompt');
     node.textContent = text ?? '';
     node.classList.toggle('show', Boolean(text));
   },
-  setReload(progress: number | null, jammed: boolean): void {
+  setReload(progress: number | null, jammed: boolean, sweet: { start: number; end: number } = { start: 0.6, end: 0.84 }): void {
     const bar = $('reload');
     if (progress == null) {
       bar.classList.add('hidden');
@@ -405,6 +463,11 @@ export const ui = {
     bar.classList.remove('hidden');
     bar.classList.toggle('jammed', jammed);
     bar.style.setProperty('--p', String(Math.max(0, Math.min(1, progress))));
+    const sweetBand = bar.querySelector('.sweet') as HTMLElement | null;
+    if (sweetBand) {
+      sweetBand.style.left = `${sweet.start * 100}%`;
+      sweetBand.style.width = `${(sweet.end - sweet.start) * 100}%`;
+    }
     const label = bar.querySelector('.reload-label');
     if (label) label.textContent = jammed ? 'jammed' : input.device === 'pad' ? 'Y in the green' : 'tap in the green';
   },
@@ -489,7 +552,7 @@ export const ui = {
       run.owned.silencer ? 'silencer' : '',
     ].filter(Boolean);
     const gear = names.length ? names.join(', ') : 'the gun you started with';
-    $('end-copy').textContent = `Above floor 8 the roof is still a rumor. The flare gun is on your belt. You kept ${gear}, ${run.notes.length} echoes, and ${run.coins} coins. Seed ${run.builtSeed ?? run.seed}.`;
+    $('end-copy').textContent = `Floor 16 ends at a hatch that will not open. You kept ${gear}, ${run.notes.length} echoes, and ${run.coins} coins. The knife is ${knifeBand(run.knife)}. Seed ${run.builtSeed ?? run.seed}.`;
     $('ending').classList.remove('hidden');
   },
   showSettings(): void {
@@ -557,8 +620,58 @@ export const ui = {
       if (!allowSkip) skip.classList.add('hidden');
     });
   },
+  showGear(run: RunState): void {
+    const slots = $('slots');
+    slots.innerHTML = '';
+    const order: Slot[] = ['helmet', 'armor', 'weapon', 'health'];
+    for (const slot of order) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'slot';
+      button.innerHTML = `<span>${slot}</span><strong>${slotLabel(run.loadout, slot)}</strong>`;
+      button.addEventListener('click', () => handlers.clearSlot(slot));
+      slots.appendChild(button);
+    }
+    const bag = $('bag');
+    bag.innerHTML = '';
+    const entries = Object.entries(run.bag) as [GearId, number][];
+    if (entries.length === 0) {
+      bag.innerHTML = '<p class="empty">The bag is empty. What you find on a floor can be worn from here.</p>';
+    }
+    entries.forEach(([id, count], index) => {
+      const def = gearDef(id);
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'shop-item';
+      button.innerHTML = `<span>${index + 1}. ${def.name} ×${count}</span><span>wear</span><small>${def.detail}</small>`;
+      button.addEventListener('click', () => handlers.equip(id));
+      bag.appendChild(button);
+    });
+    $('gear-msg').textContent = '';
+    $('gear').classList.remove('hidden');
+  },
+  refreshGear(run: RunState): void {
+    this.showGear(run);
+  },
+  gearMessage(text: string): void {
+    $('gear-msg').textContent = text;
+  },
+  hideGear(): void {
+    $('gear').classList.add('hidden');
+  },
+  nudgeGear(dir: -1 | 1): void {
+    const buttons = [...document.querySelectorAll<HTMLButtonElement>('#bag .shop-item')];
+    if (buttons.length === 0) return;
+    const current = buttons.findIndex((button) => button.classList.contains('selected'));
+    const next = current < 0 ? 0 : (current + dir + buttons.length) % buttons.length;
+    buttons.forEach((button, index) => button.classList.toggle('selected', index === next));
+  },
+  confirmGear(): void {
+    const button = document.querySelector<HTMLButtonElement>('#bag .shop-item.selected') ?? document.querySelector<HTMLButtonElement>('#bag .shop-item');
+    button?.click();
+  },
   hideOverlays(): void {
-    for (const id of ['menu', 'shop', 'pause', 'transition', 'ending', 'settings', 'wager', 'intro']) {
+    for (const id of ['menu', 'shop', 'pause', 'transition', 'ending', 'settings', 'wager', 'intro', 'gear']) {
       $(id).classList.add('hidden');
     }
   },

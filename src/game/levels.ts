@@ -69,6 +69,8 @@ const floor1 = (): LevelData => ({
     { x: 2320, y: 304 },
   ],
   exits: [{ x: 2310, y: 230, w: 80, h: 74 }],
+  stones: [{ x: 980, y: 400 }],
+  gear: [{ x: 1180, y: 400, id: 'jacket' }],
 });
 
 const floor2 = (): LevelData => ({
@@ -242,7 +244,7 @@ const floor3 = (): LevelData => ({
 const LEVELS = [floor1, floor2, floor3];
 
 export function getLevel(floor: number, opts?: { seed?: number; seenNotes?: readonly string[] }): LevelData {
-  if (floor >= 4 && floor <= 8) return generateFloor(floor, opts?.seed ?? 1, opts?.seenNotes ?? []);
+  if (floor >= 4) return generateFloor(floor, opts?.seed ?? 1, opts?.seenNotes ?? []);
   const build = LEVELS[Math.min(Math.max(floor, 1), 3) - 1] ?? floor1;
   return build();
 }

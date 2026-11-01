@@ -34,13 +34,15 @@ export function strike(input: {
   weapon: MeleeWeapon;
   sharpened: boolean;
   roll: number;
+  /** Workbench levels lower this below 1 so the edge lasts longer. */
+  wearScale?: number;
 }): Strike {
   if (input.weapon === 'pipe') {
     return { durability: input.durability, damage: 1, reach: 46, cooldown: 0.55, glanced: false };
   }
   const band = input.sharpened ? 'sharp' : knifeBand(input.durability);
-  const wear = input.weapon === 'hatchet' ? 12 : 8;
-  const next = Math.max(0, input.durability - (input.sharpened ? wear * 0.5 : wear));
+  const wear = (input.weapon === 'hatchet' ? 12 : 8) * (input.sharpened ? 0.5 : 1) * (input.wearScale ?? 1);
+  const next = Math.max(0, input.durability - wear);
   const whiff = band === 'sharp' ? 0 : band === 'worn' ? 0.28 : 0.55;
   const glanced = input.roll < whiff;
   const base = input.weapon === 'hatchet' ? 2 : 1;

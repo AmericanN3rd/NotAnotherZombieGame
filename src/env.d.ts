@@ -16,6 +16,11 @@ interface NazgDebug {
   setKnife: (n: number) => void;
   setHp: (n: number) => void;
   give: (id: string) => void;
+  setSalvage: (n: number) => void;
+  setStations: (n: number) => void;
+  openStation: (id: string) => void;
+  die: () => void;
+  pocket: (n: number) => void;
 }
 
 interface Window {

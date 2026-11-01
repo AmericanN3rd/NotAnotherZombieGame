@@ -56,17 +56,21 @@ export function powerPrice(id: PowerId, floor: number): number {
   return Math.max(base, scaled);
 }
 
-/** Stable three-item stock for a floor. The same seed always fills the same slots. */
-export function stockPowers(floor: number, seed: number): [PowerId, PowerId, PowerId] {
+/**
+ * Stable stock for a floor. The same seed and the same unlocked set fill the same slots.
+ * Fewer than three unlocked powers means the cache shows every one of them.
+ */
+export function stockPowers(floor: number, seed: number, unlocked?: readonly PowerId[]): PowerId[] {
+  const bag = [...(unlocked ?? POWER_IDS)];
+  if (bag.length <= 3) return bag;
   const rng = mulberry32((Math.imul(seed, 997) + Math.imul(floor, 131)) >>> 0);
-  const bag = [...POWER_IDS];
   const picked: PowerId[] = [];
-  while (picked.length < 3) {
+  while (picked.length < 3 && bag.length > 0) {
     const index = Math.floor(rng() * bag.length);
     const [id] = bag.splice(index, 1);
     if (id) picked.push(id);
   }
-  return [picked[0]!, picked[1]!, picked[2]!];
+  return picked;
 }
 
 export interface Buffs {

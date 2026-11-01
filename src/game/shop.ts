@@ -51,15 +51,15 @@ export function spentOn(run: RunState, floor: number): number {
 
 const GUN_PARTS = new Set<ClassicId>(['power', 'compensator', 'silencer']);
 
-/** Staples, three seeded powers, then any gun part that is not already fitted. */
-export function offersFor(run: RunState): Offer[] {
+/** Staples, up to three seeded powers the camp has heard of, then unowned gun parts. */
+export function offersFor(run: RunState, unlocked?: readonly PowerId[]): Offer[] {
   const floor = run.floor;
   const offers: Offer[] = [];
   for (const item of SHOP_ITEMS) {
     if (item.id !== 'ammo' && item.id !== 'stone') continue;
     offers.push({ ...item, owned: false, group: 'staple' });
   }
-  for (const id of stockPowers(floor, run.seed)) {
+  for (const id of stockPowers(floor, run.seed, unlocked)) {
     const def = powerDef(id);
     offers.push({
       id,

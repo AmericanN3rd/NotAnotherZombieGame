@@ -187,6 +187,8 @@ body.low-fx #vignette.pulse { animation: none; }
 }
 #flare.armed { color: #1a120c; background: var(--amber); border-color: var(--amber); }
 #kit-gun { color: var(--ink); font-size: 12px; }
+#salvage { color: var(--amber); font-size: 12px; }
+#end-salvage { color: var(--amber); font-family: ui-monospace, sans-serif; letter-spacing: 0.04em; font-size: 16px; }
 
 #prompt {
   position: absolute;

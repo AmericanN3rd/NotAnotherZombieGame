@@ -1,6 +1,6 @@
 # NAZG (Not Another Zombie Game)
 
-A playable prototype of a 2D horror platformer. You climb a dead tower alone, through floor 16, where a hatch stays shut. Notes are the only voices. You never meet anyone alive.
+A roguelike climb through a dead tower. The lobby is your camp and the main menu. You go up alone, lose the run's gear when you fall, and keep the salvage. Notes are the only voices. You never meet anyone alive.
 
 ## Why Phaser 3, TypeScript, and Vite
 
@@ -79,11 +79,30 @@ Gunshots are loud and pull nearby undead. A hard landing does too, unless you bo
 
 Reload is a moving bar: press reload again in the green band for a clean reload, press outside it and the gun jams, or let the bar finish for a slow safe reload. Steady Hands widens the green band for the floor. Gun Oil makes a bad tap do nothing instead of jamming. That second press is the same button on a pad as the first. Notes are picked up by walking over them. B / E holds the lock bypass and opens the cache. The flare gun fires only after you buy a Flare Shell. One shell stuns whatever is close, then it is gone.
 
+## Camp
+
+Floor 1 is the lobby. Walk to a station and use it. The board on the left is notices: settings, controls, and credits. The stairs on the right start a climb. The first time you stand in the lobby, one line tells you that.
+
+Salvage is banked as you pick up coins, when you clear a floor, and as a scrap if you die with empty pockets. It stays in `localStorage` (`nazg-meta`, version 1). The run's coins, gun parts, knife edge, and pack are thrown out on death or when you leave the climb. v0.2.0 did not save a run. Brightness, low effects, the intro flag, and a locked seed still live in `nazg-settings` and are kept. Salvage and the stations start at zero because they did not exist. Settings has **Reset progress**, which clears the camp and leaves those options alone.
+
+| Station | What it buys |
+| --- | --- |
+| Workbench | Faster reload, a wider active-reload band, a knife that dulls slower. Gun Oil enters the caches at the first level. |
+| Armory | A larger magazine, more starting ammunition, then a jacket, then a bandage and a helm. Hollow points and flare shells enter later. |
+| Infirmary | Up to three extra health. Adrenaline shots enter at the first level. |
+| Radio | How far the stairs will take you: floor 5, then 8, then 12, then the hatch on 16. Bait, rubber soles, and lucky coins enter as it climbs. |
+
+Costs run 8, then the teens, then the thirties and forties, so a short clear buys a level and a full camp takes a string of runs. The lobby shows it: a bare room, then a barricade, then sandbags, then patched walls and more bulbs.
+
+Each climb reseeds floors 4 and up unless Settings locks a seed.
+
 ## Floors
 
-1. **Quiet.** A ward with something that sleeps until you shoot, the line “they’re inside, be careful.”, the line “I can’t wake up.”, and the first vending cache. A jacket and a sharpening stone are on the floor. The wallet starts at 36 coins (a stand-in for Recon earnings). This floor will only sell 30 coins of gear.
-2. **Two ways up.** Spikes and pits along the maintenance hall, with no undead. A vent is faster and ends at a computer lock. Bypass it and the undead (and a ferret) on the other side wake up.
-3. **Hollow floors.** More undead, ferrets, and a macaw that screams and calls bigger threats. Ladders start here. A crumbled span drops you to the bottom of the floor; you keep your gear, then climb out.
+1. **Lobby.** No enemies. Stations, a note (“they’re inside, be careful.”), and the stairs.
+2. **The first hall.** The old quiet ward: a sleeper, the vending cache, a sharpening stone, and a jacket on the floor. The wallet still starts at 36 coins. This floor will only sell 30 coins of gear.
+3. **Two ways up.** Spikes and pits along the maintenance hall, with no undead. A vent is faster and ends at a computer lock. Bypass it and the undead (and a ferret) on the other side wake up.
+4 and up. **Generated.** Ladders, crumble drops, and the rest of the old third floor now come from the generator. The radio at camp has to be raised before the stairs will pass floor 5, then 8, then 12.
+
 4–8. **Generated tenement.** Hand-authored chunks (corridors, spike runs, pits, ladder shafts, vents, locks, crumble drops, shops, note nooks) are chained from a seed. Difficulty ticks up each floor: more and tougher undead, denser traps, fewer medkits and coins. From floor 4, a ladder slips if an undead is close. The pause screen shows the seed that built the floor; Settings can lock one for testing, and `window.__nazg.setSeed(n)` does the same.
 6. **Wager.** A vending machine offers three optional lanes under the hall. Harder lanes pay more coins. The stairs up stay on the main floor.
 9–12. **Ward.** The same generator, in a green emptied ward. New chunks: steam that scalds on a cycle, a blackout with dead bulbs, and an alarm hall. Spend limits keep falling. Medkits are gone by 12.
@@ -91,7 +110,7 @@ Reload is a moving bar: press reload again in the green band for a clean reload,
 
 ## Vending cache
 
-Every machine still has a per-floor spend limit. Rounds and a sharpening stone are always for sale. Gun parts (compensator, power, silencer) stay until you own them. On top of that, each floor stocks three powers chosen from the climb seed. The same seed always stocks the same three. Prices rise about 12% per floor.
+Every machine still has a per-floor spend limit. Rounds and a sharpening stone are always for sale. Gun parts (compensator, power, silencer) stay until you own them. On top of that, each floor stocks up to three powers from the ones the camp has unlocked, chosen from the climb seed. Prices rise about 12% per floor. A fresh camp stocks Steady Hands, Sharpened Knife, and Hollow Points. The other powers arrive as the stations level.
 
 | Power | Effect |
 | --- | --- |
@@ -118,6 +137,18 @@ Helmet, armor, weapon, and a health item. Open it with Pack, I, or View on a pad
 | Armor | Lined jacket or scrap plate (hits deal 1 less, and still at least 1; plate also slows you), trauma vest (+1 max health) |
 | Weapon | Knife (starts here), hatchet (harder, dulls faster), pipe (longer reach, no edge to lose) |
 | Health | Bandage heals 1, stim heals 2 and sprints, field kit heals 3. Using it spends one. |
+
+## Music
+
+Three slots loop and crossfade when you move between the lobby, the climb, and floor 16:
+
+| Slot | File |
+| --- | --- |
+| Basecamp | `public/audio/music/camp.ogg` |
+| Climb | `public/audio/music/climb.ogg` |
+| Hatch | `public/audio/music/hatch.ogg` |
+
+Replace a slot by dropping a file on that name. `.ogg` (Vorbis) is the one to use for the Android WebView: it is small, Chromium decodes it, and a loop crossfades cleanly. `.m4a` (AAC) is the other phone-friendly choice. `.mp3` also plays. If several extensions share a name, `.ogg` is the one that loads. Do not use WAV; it is heavy to decode on a phone. The files shipping here are CC0 placeholders (a piano sting and the Abyss bed). Credits, including an **Original music by the user** section, are in `AUDIO_CREDITS.md`.
 
 ## Phone performance
 

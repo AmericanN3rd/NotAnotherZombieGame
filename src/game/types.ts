@@ -108,4 +108,24 @@ export interface LevelData {
   /** Vents that scald on a cycle. */
   steam?: Rect[];
   theme?: 'tenement' | 'ward' | 'machine';
+  /** Lobby stations. Combat floors leave this empty. */
+  stations?: CampStation[];
+  /** Barricades and patches drawn in the camp. Not solid. */
+  dressing?: CampDressing[];
+}
+
+export type CampStationId = 'notices' | 'workbench' | 'armory' | 'infirmary' | 'radio' | 'climb';
+
+export interface CampStation {
+  id: CampStationId;
+  x: number;
+  y: number;
+}
+
+export interface CampDressing {
+  kind: 'barricade' | 'sandbag' | 'patch' | 'rubble';
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }

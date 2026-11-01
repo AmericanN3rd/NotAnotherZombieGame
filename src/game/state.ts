@@ -1,6 +1,7 @@
-import { MAG_SIZE, PLAYER_MAX_HP, START_COINS, START_MAG, START_RESERVE } from './balance';
+import { MAG_SIZE, START_COINS, START_MAG, START_RESERVE } from './balance';
 import { emptyLoadout, type GearCarrier, type GearId, type Loadout } from './gear';
 import { KNIFE_MAX } from './knife';
+import { bonuses, metaState } from './meta';
 import { emptyBuffs, type Buffs } from './powerups';
 import { settings } from './settings';
 
@@ -48,18 +49,31 @@ export interface RunState {
   bag: Partial<Record<GearId, number>>;
   loadout: Loadout;
   buffs: Buffs;
+  /** Workbench: 1 is the stock reload, lower is faster. */
+  reloadScale: number;
+  /** Added to both sides of the active-reload window. */
+  windowWiden: number;
+  /** Multiplier on knife wear. */
+  wearScale: number;
+  /** Salvage pocketed during this climb. Already added to the meta wallet. */
+  salvageEarned: number;
 }
 
 export function createRun(): RunState {
+  const bonus = bonuses(metaState());
+  const loadout = emptyLoadout();
+  if (bonus.jacket) loadout.armor = 'jacket';
+  if (bonus.bandage) loadout.health = 'bandage';
+  if (bonus.helm) loadout.helmet = 'helm';
   return {
     started: false,
     floor: 1,
-    hp: PLAYER_MAX_HP,
-    maxHp: PLAYER_MAX_HP,
+    hp: bonus.maxHp,
+    maxHp: bonus.maxHp,
     coins: START_COINS,
-    mag: START_MAG,
-    reserve: START_RESERVE,
-    magSize: MAG_SIZE,
+    mag: Math.min(bonus.magSize, START_MAG + (bonus.magSize - MAG_SIZE)),
+    reserve: START_RESERVE + bonus.reserveBonus,
+    magSize: bonus.magSize,
     gunDamage: 1,
     owned: { power: false, compensator: false, silencer: false },
     notes: [],
@@ -71,8 +85,12 @@ export function createRun(): RunState {
     seed: settings.seed ?? Math.floor(Math.random() * 900000) + 1,
     knife: KNIFE_MAX,
     bag: {},
-    loadout: emptyLoadout(),
+    loadout,
     buffs: emptyBuffs(),
+    reloadScale: bonus.reloadScale,
+    windowWiden: bonus.windowWiden,
+    wearScale: bonus.wearScale,
+    salvageEarned: 0,
   };
 }
 

@@ -1,4 +1,5 @@
 import { FLOOR_1_SPEND_LIMIT } from './balance';
+import { campLevel } from './camp';
 import { generateFloor } from './generate';
 import type { LevelData, Rect } from './types';
 
@@ -7,9 +8,9 @@ function stair(x: number, top: number, w: number, bottom: number): Rect {
 }
 
 const floor1 = (): LevelData => ({
-  id: 1,
-  name: 'Floor 1',
-  enter: 'Quiet',
+  id: 2,
+  name: 'Floor 2',
+  enter: 'The first hall',
   width: 2400,
   height: 520,
   spawn: { x: 100, y: 400 },
@@ -74,8 +75,8 @@ const floor1 = (): LevelData => ({
 });
 
 const floor2 = (): LevelData => ({
-  id: 2,
-  name: 'Floor 2',
+  id: 3,
+  name: 'Floor 3',
   enter: 'Two ways up',
   width: 3000,
   height: 700,
@@ -162,89 +163,13 @@ const floor2 = (): LevelData => ({
   ],
 });
 
-const floor3 = (): LevelData => ({
-  id: 3,
-  name: 'Floor 3',
-  enter: 'Hollow floors',
-  width: 2600,
-  height: 1180,
-  spawn: { x: 110, y: 640 },
-  spendLimit: 24,
-  platforms: [
-    { x: 0, y: 1000, w: 2600, h: 180 },
-    { x: 0, y: 640, w: 1120, h: 48 },
-    { x: 1580, y: 640, w: 1020, h: 48 },
-    { x: 500, y: 500, w: 210, h: 20 },
-    { x: 1880, y: 450, w: 680, h: 24 },
-    { x: 2140, y: 270, w: 460, h: 24 },
-  ],
-  walls: [],
-  ladders: [
-    { x: 548, y: 468, w: 44, h: 190 },
-    { x: 1668, y: 608, w: 48, h: 410 },
-    { x: 1908, y: 418, w: 44, h: 250 },
-    { x: 2188, y: 238, w: 44, h: 230 },
-  ],
-  spikes: [
-    { x: 340, y: 614, w: 150, h: 28 },
-    { x: 2240, y: 614, w: 130, h: 28 },
-    { x: 40, y: 974, w: 240, h: 28 },
-  ],
-  pits: [],
-  crumble: { x: 1120, y: 640, w: 460, h: 26 },
-  notes: [
-    { id: 'f3-hollow', x: 210, y: 640, text: 'This stretch of floor sounds hollow.' },
-    { id: 'f3-up', x: 620, y: 500, text: 'Up is the only way that still opens.' },
-    { id: 'f3-fall', x: 1360, y: 1000, text: 'I fell and kept the gun. Small mercy.' },
-    { id: 'f3-birds', x: 2080, y: 450, text: "I can't tell if the birds are warning me or calling them." },
-    { id: 'f3-answer', x: 2340, y: 270, text: "Something upstairs keeps answering. I hope it isn't me." },
-  ],
-  coins: [{ x: 1460, y: 1000, amount: 6 }],
-  medkits: [
-    { x: 680, y: 500, heal: 2 },
-    { x: 2460, y: 270, heal: 2 },
-  ],
-  shop: null,
-  terminals: [],
-  doors: [],
-  signs: [
-    { x: 600, y: 478, text: 'LADDER' },
-    { x: 1280, y: 610, text: 'HOLLOW' },
-    { x: 1692, y: 960, text: 'CLIMB' },
-    { x: 2400, y: 248, text: 'ROOF ACCESS' },
-  ],
-  lights: [
-    { x: 200, y: 520, color: 0x8f2d2d, radius: 120, flicker: true },
-    { x: 900, y: 520, color: 0x6a7384, radius: 100 },
-    { x: 1360, y: 860, color: 0x8f2d2d, radius: 140, flicker: true },
-    { x: 2100, y: 520, color: 0x8f2d2d, radius: 110, flicker: true },
-    { x: 2360, y: 200, color: 0xc4b49a, radius: 120 },
-  ],
-  enemies: [
-    { kind: 'undead', x: 720, y: 640, minX: 560, maxX: 880 },
-    { kind: 'undead', x: 990, y: 640, minX: 900, maxX: 1100 },
-    { kind: 'ferret', x: 1040, y: 640, minX: 900, maxX: 1100 },
-    { kind: 'undead', x: 400, y: 1000, minX: 200, maxX: 640, leash: 360 },
-    { kind: 'ferret', x: 520, y: 1000, minX: 280, maxX: 720, leash: 320 },
-    { kind: 'undead', x: 1960, y: 640, minX: 1720, maxX: 2280 },
-    { kind: 'undead', x: 2340, y: 640, minX: 2080, maxX: 2540 },
-    { kind: 'ferret', x: 2480, y: 640, minX: 2200, maxX: 2560 },
-    { kind: 'macaw', x: 2080, y: 540, minX: 1880, maxX: 2460, leash: 640 },
-  ],
-  checkpoints: [
-    { x: 110, y: 640 },
-    { x: 1360, y: 1000 },
-    { x: 1760, y: 640 },
-    { x: 2060, y: 450 },
-    { x: 2320, y: 270 },
-  ],
-  exits: [{ x: 2380, y: 160, w: 180, h: 112 }],
-});
-
-const LEVELS = [floor1, floor2, floor3];
-
-export function getLevel(floor: number, opts?: { seed?: number; seenNotes?: readonly string[] }): LevelData {
-  if (floor >= 4) return generateFloor(floor, opts?.seed ?? 1, opts?.seenNotes ?? []);
-  const build = LEVELS[Math.min(Math.max(floor, 1), 3) - 1] ?? floor1;
-  return build();
+export function getLevel(
+  floor: number,
+  opts?: { seed?: number; seenNotes?: readonly string[]; campTier?: 0 | 1 | 2 | 3 },
+): LevelData {
+  if (floor <= 1) return campLevel(opts?.campTier ?? 0);
+  if (floor === 2) return floor1();
+  if (floor === 3) return floor2();
+  return generateFloor(floor, opts?.seed ?? 1, opts?.seenNotes ?? []);
 }
+

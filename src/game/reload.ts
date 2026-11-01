@@ -29,6 +29,8 @@ export function beginReload(state: ReloadState): ReloadState {
 
 export interface ReloadOpts {
   window?: { start: number; end: number };
+  /** Seconds for a full bar. Workbench levels shorten this. */
+  duration?: number;
   /** Gun Oil: a tap outside the window is ignored instead of jamming. */
   oil?: boolean;
 }
@@ -48,9 +50,10 @@ export function tickReload(
     return { state: { phase: 'jammed', t }, event: 'none' };
   }
 
+  const duration = opts?.duration ?? RELOAD_DURATION;
   if (tap) {
     const window = opts?.window ?? RELOAD_WINDOW;
-    const p = state.t / RELOAD_DURATION;
+    const p = state.t / duration;
     if (p >= window.start && p <= window.end) {
       return { state: idleReload(), event: 'perfect' };
     }
@@ -59,11 +62,11 @@ export function tickReload(
   }
 
   const t = state.t + dt;
-  if (t >= RELOAD_DURATION) return { state: idleReload(), event: 'normal' };
+  if (t >= duration) return { state: idleReload(), event: 'normal' };
   return { state: { phase: 'active', t }, event: 'none' };
 }
 
-export function reloadProgress(state: ReloadState): number {
+export function reloadProgress(state: ReloadState, duration = RELOAD_DURATION): number {
   if (state.phase !== 'active') return 0;
-  return Math.max(0, Math.min(1, state.t / RELOAD_DURATION));
+  return Math.max(0, Math.min(1, state.t / duration));
 }

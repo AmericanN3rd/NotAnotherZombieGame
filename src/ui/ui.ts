@@ -3,6 +3,7 @@ import { RELEASE_PAGE } from '../game/updateCheck';
 import { saveSettings, settings, watchSettings } from '../game/settings';
 import { gearDef, slotLabel, type GearId, type Slot } from '../game/gear';
 import { knifeBand } from '../game/knife';
+import { metaState, nextBlurb, nextCost, stationLevel, stationName, unlockedPowers, type Meta, type StationId } from '../game/meta';
 import type { ItemId } from '../game/shop';
 import { offersFor, spentOn } from '../game/shop';
 import type { EchoNote, RunState } from '../game/state';
@@ -25,6 +26,7 @@ export interface HudData {
   helmet: string;
   armor: string;
   weapon: string;
+  salvage: number;
 }
 
 interface Handlers {
@@ -42,6 +44,15 @@ interface Handlers {
   equip: (id: GearId) => void;
   clearSlot: (slot: Slot) => void;
   useHealth: () => void;
+  buyStation: (id: StationId) => void;
+  closeStation: () => void;
+  showNotices: () => void;
+  returnToCamp: () => void;
+  resetProgress: () => void;
+  leaveClimb: () => void;
+  noticeSettings: () => void;
+  noticeControls: () => void;
+  noticeCredits: () => void;
 }
 
 const root = document.getElementById('ui');
@@ -75,6 +86,7 @@ root.innerHTML = `
         <button id="flare" type="button">Flare</button>
       </div>
       <div id="coins">0 coins</div>
+      <div id="salvage">0 salvage</div>
       <div id="kit-gun">pistol</div>
       <div id="note-count">0 echoes</div>
     </div>
@@ -98,12 +110,12 @@ root.innerHTML = `
       <button type="button" data-act="jump">Jump</button>
     </div>
   </div>
-  <section id="menu" class="panel-wrap">
+  <section id="menu" class="panel-wrap hidden">
     <div class="panel">
       <p class="kicker">a tower, already dead</p>
       <h1>NAZG</h1>
       <p class="sub">Not Another Zombie Game</p>
-      <p class="blurb">Floors 1–16. You never see anyone alive. The hatch above 16 stays shut.</p>
+      <p class="blurb">The lobby is the camp. The stairs start a climb. You never see anyone alive.</p>
       <button id="climb" type="button">Climb</button>
       <button id="open-settings" type="button" class="ghost">Settings</button>
       <ul class="controls">
@@ -148,6 +160,7 @@ root.innerHTML = `
       <div id="journal"></div>
       <p id="pause-seed" class="seed-line"></p>
       <button id="resume" type="button">Keep climbing</button>
+      <button id="pause-leave" type="button" class="ghost">Leave the climb</button>
       <button id="pause-settings" type="button" class="ghost">Settings</button>
     </div>
   </section>
@@ -169,6 +182,7 @@ root.innerHTML = `
       <div class="setting-row">
         <button id="set-apply" type="button">Apply seed</button>
         <button id="set-replay" type="button" class="ghost">Replay the door</button>
+        <button id="set-reset" type="button" class="ghost">Reset progress</button>
         <button id="set-close" type="button" class="ghost">Close</button>
       </div>
     </div>
@@ -193,11 +207,71 @@ root.innerHTML = `
     <button id="intro-skip" type="button" class="hidden">Skip</button>
     <button id="intro-go" type="button" class="hidden">Go in</button>
   </section>
+  <section id="station" class="panel-wrap hidden">
+    <div class="panel">
+      <p class="kicker" id="station-kicker">station</p>
+      <h2 id="station-title">Workbench</h2>
+      <p id="station-level"></p>
+      <p id="station-next"></p>
+      <p id="station-msg"></p>
+      <div class="setting-row">
+        <button id="station-buy" type="button">Improve</button>
+        <button id="station-close" type="button" class="ghost">Step back</button>
+      </div>
+    </div>
+  </section>
+  <section id="notices" class="panel-wrap hidden">
+    <div class="panel">
+      <p class="kicker">pinned to the wall</p>
+      <h2>Notices</h2>
+      <p class="empty">No one else posted these. The board is just here.</p>
+      <div class="setting-row">
+        <button id="notice-settings" type="button">Settings</button>
+        <button id="notice-controls" type="button" class="ghost">Controls</button>
+        <button id="notice-credits" type="button" class="ghost">Credits</button>
+        <button id="notice-close" type="button" class="ghost">Step back</button>
+      </div>
+    </div>
+  </section>
+  <section id="controls-panel" class="panel-wrap hidden">
+    <div class="panel">
+      <p class="kicker">how you move</p>
+      <h2>Controls</h2>
+      <ul class="controls">
+        <li>Move A/D or arrows. Jump Space. Climb W/S on ladders.</li>
+        <li>Knife J. Shoot K. Reload R. Use E. Pack I.</li>
+        <li>Pad: stick or D-pad, A jump, X knife, RT shoot, Y reload, B use, View pack, Menu pauses.</li>
+        <li>Reload again in the green. A miss jams the gun unless you bought gun oil.</li>
+        <li>The camp stairs start a climb. Death keeps salvage and drops the run's gear.</li>
+      </ul>
+      <button id="controls-close" type="button">Step back</button>
+    </div>
+  </section>
+  <section id="credits" class="panel-wrap hidden">
+    <div class="panel">
+      <p class="kicker">who is not here</p>
+      <h2>Credits</h2>
+      <p>You are alone in the tower. The stations are furniture.</p>
+      <p class="empty">Sound effects in the climb are synthesized. Weather, the door, and the walls are CC0 files listed in AUDIO_CREDITS.md.</p>
+      <p class="empty">Music slots: camp, climb, and the hatch. The files in public/audio/music/ are CC0 placeholders until original tracks replace them.</p>
+      <p><strong>Original music by the user.</strong> Drop camp, climb, and hatch into public/audio/music/.</p>
+      <button id="credits-close" type="button">Step back</button>
+    </div>
+  </section>
+  <section id="run-end" class="panel-wrap hidden">
+    <div class="panel">
+      <p class="kicker" id="end-kicker">the climb stops</p>
+      <h2 id="end-title">You fall.</h2>
+      <p id="end-copy"></p>
+      <p id="end-salvage"></p>
+      <button id="end-camp" type="button">Back to the lobby</button>
+    </div>
+  </section>
   <section id="ending" class="panel-wrap hidden">
     <div class="panel">
       <p class="kicker">to be continued</p>
       <h2>The hatch will not open.</h2>
-      <p id="end-copy"></p>
+      <p id="end-legacy"></p>
       <button id="again" type="button">Climb again</button>
     </div>
   </section>
@@ -224,6 +298,15 @@ let handlers: Handlers = {
   equip: () => undefined,
   clearSlot: () => undefined,
   useHealth: () => undefined,
+  buyStation: () => undefined,
+  closeStation: () => undefined,
+  showNotices: () => undefined,
+  returnToCamp: () => undefined,
+  resetProgress: () => undefined,
+  leaveClimb: () => undefined,
+  noticeSettings: () => undefined,
+  noticeControls: () => undefined,
+  noticeCredits: () => undefined,
 };
 
 let toastTimer = 0;
@@ -264,6 +347,7 @@ $('gear-close').addEventListener('click', () => handlers.closeGear());
 $('use-health').addEventListener('click', () => handlers.useHealth());
 $('open-settings').addEventListener('click', () => ui.showSettings());
 $('pause-settings').addEventListener('click', () => ui.showSettings());
+$('pause-leave').addEventListener('click', () => handlers.leaveClimb());
 $('set-close').addEventListener('click', () => ui.hideSettings());
 $('wager-close').addEventListener('click', () => handlers.closeWager());
 $('set-apply').addEventListener('click', () => {
@@ -271,6 +355,19 @@ $('set-apply').addEventListener('click', () => {
   if (Number.isFinite(value)) handlers.applySeed(Math.floor(value));
 });
 $('set-replay').addEventListener('click', () => handlers.replayIntro());
+$('set-reset').addEventListener('click', () => handlers.resetProgress());
+$('station-close').addEventListener('click', () => handlers.closeStation());
+$('station-buy').addEventListener('click', () => {
+  const id = $('station').dataset.station as StationId | undefined;
+  if (id) handlers.buyStation(id);
+});
+$('notice-settings').addEventListener('click', () => handlers.noticeSettings());
+$('notice-controls').addEventListener('click', () => handlers.noticeControls());
+$('notice-credits').addEventListener('click', () => handlers.noticeCredits());
+$('notice-close').addEventListener('click', () => ui.hideNotices());
+$('controls-close').addEventListener('click', () => $('controls-panel').classList.add('hidden'));
+$('credits-close').addEventListener('click', () => $('credits').classList.add('hidden'));
+$('end-camp').addEventListener('click', () => handlers.returnToCamp());
 $('set-bright').addEventListener('input', () => {
   settings.brightness = Number(($('set-bright') as HTMLInputElement).value) / 100;
   saveSettings(settings);
@@ -354,7 +451,7 @@ function renderShop(run: RunState, limit: number): void {
   $('shop-wallet').textContent = `Coins ${run.coins} · this floor ${spent}/${limit}. Three powers, plus rounds and a stone.`;
   const list = $('shop-items');
   list.innerHTML = '';
-  offersFor(run).forEach((item, index) => {
+  offersFor(run, unlockedPowers(metaState())).forEach((item, index) => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'shop-item';
@@ -448,6 +545,7 @@ export const ui = {
     gun.textContent = tags.join(' · ');
     $('flare').textContent = data.flareShells > 0 ? `Flare ${data.flareShells}` : 'Flare';
     $('flare').classList.toggle('armed', data.flareShells > 0);
+    $('salvage').textContent = `${data.salvage} salvage`;
   },
   setPrompt(text: string | null): void {
     const node = $('prompt');
@@ -552,7 +650,7 @@ export const ui = {
       run.owned.silencer ? 'silencer' : '',
     ].filter(Boolean);
     const gear = names.length ? names.join(', ') : 'the gun you started with';
-    $('end-copy').textContent = `Floor 16 ends at a hatch that will not open. You kept ${gear}, ${run.notes.length} echoes, and ${run.coins} coins. The knife is ${knifeBand(run.knife)}. Seed ${run.builtSeed ?? run.seed}.`;
+    $('end-legacy').textContent = `Floor 16 ends at a hatch that will not open. You kept ${gear}, ${run.notes.length} echoes, and ${run.coins} coins. The knife is ${knifeBand(run.knife)}. Seed ${run.builtSeed ?? run.seed}.`;
     $('ending').classList.remove('hidden');
   },
   showSettings(): void {
@@ -670,8 +768,61 @@ export const ui = {
     const button = document.querySelector<HTMLButtonElement>('#bag .shop-item.selected') ?? document.querySelector<HTMLButtonElement>('#bag .shop-item');
     button?.click();
   },
+  showStation(meta: Meta, id: StationId): void {
+    const level = stationLevel(meta, id);
+    $('station').dataset.station = id;
+    $('station-kicker').textContent = 'salvage ' + meta.salvage;
+    $('station-title').textContent = stationName(id);
+    $('station-level').textContent = level >= 3 ? 'Raised as far as the lobby allows.' : `Level ${level} of 3.`;
+    $('station-next').textContent = nextBlurb(id, level);
+    const cost = nextCost(meta, id);
+    $('station-buy').textContent = cost == null ? 'Nothing to add' : `Improve · ${cost} salvage`;
+    ($('station-buy') as HTMLButtonElement).disabled = cost == null || meta.salvage < cost;
+    $('station-msg').textContent = '';
+    $('station').classList.remove('hidden');
+  },
+  stationMessage(text: string): void {
+    $('station-msg').textContent = text;
+  },
+  hideStation(): void {
+    $('station').classList.add('hidden');
+  },
+  showControls(): void {
+    $('controls-panel').classList.remove('hidden');
+  },
+  showCredits(): void {
+    $('credits').classList.remove('hidden');
+  },
+  showNotices(): void {
+    $('notices').classList.remove('hidden');
+  },
+  hideNotices(): void {
+    $('notices').classList.add('hidden');
+  },
+  showRunEnd(data: { reason: 'dead' | 'leave' | 'hatch'; earned: number; total: number; floor: number }): void {
+    const title = $('end-title');
+    const kicker = $('end-kicker');
+    if (data.reason === 'hatch') {
+      kicker.textContent = 'floor 16';
+      title.textContent = 'The hatch stays shut.';
+      $('end-copy').textContent = 'You came back down with what the tower let you keep. The gear from the climb does not.';
+    } else if (data.reason === 'leave') {
+      kicker.textContent = 'walking back';
+      title.textContent = 'You leave the climb.';
+      $('end-copy').textContent = 'The gun, the knife’s edge, and the pockets of coins stay in the tower. Salvage does not.';
+    } else {
+      kicker.textContent = 'the climb stops';
+      title.textContent = 'You fall.';
+      $('end-copy').textContent = `Floor ${data.floor} keeps the gear. The lobby is still downstairs, and the salvage is still yours.`;
+    }
+    $('end-salvage').textContent = `This run pocketed ${data.earned}. Salvage kept: ${data.total}.`;
+    $('run-end').classList.remove('hidden');
+  },
+  hideRunEnd(): void {
+    $('run-end').classList.add('hidden');
+  },
   hideOverlays(): void {
-    for (const id of ['menu', 'shop', 'pause', 'transition', 'ending', 'settings', 'wager', 'intro', 'gear']) {
+    for (const id of ['menu', 'shop', 'pause', 'transition', 'ending', 'settings', 'wager', 'intro', 'gear', 'station', 'notices', 'controls-panel', 'credits', 'run-end']) {
       $(id).classList.add('hidden');
     }
   },

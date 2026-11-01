@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0
+
+- Floor 1 is the lobby camp and the main menu. Notices on the wall open settings, controls, and credits. The stairs start a climb. Nobody else is there.
+- Salvage is pocketed during a run and kept on death. Coins, gun parts, the knife’s edge, and found gear are lost. Each run reseeds floors 4 and up unless a seed is locked in settings.
+- Four stations level up with salvage: workbench (reload and knife), armory (ammo and starting gear), infirmary (max health), radio (how high the climb can go, and which powers the caches stock). The lobby grows barricades, sandbags, lights, and patched walls as the stations rise.
+- Floors 2 and 3 stay hand-built (the old quiet hall, then the two routes). The old top floor’s ladders and crumble live in the generator from floor 4. A first visit to the lobby says what the stations and the stairs are.
+- Meta progress is `nazg-meta` version 1. v0.2.0 had no run save. Brightness, low effects, the intro flag, and a locked seed in `nazg-settings` are kept. Salvage and stations start at zero. Settings can reset progress without touching those options.
+- Three music slots loop and crossfade: `public/audio/music/camp`, `climb`, and `hatch`. The files there are CC0 placeholders. Drop ogg, m4a, or mp3 on those names to replace them.
+- Debug APK stays on the committed `androiddebugkey` certificate, versionCode 3, so it installs over 0.2.0.
+
 ## 0.2.0
 
 - HUD is three readable meters: vital, magazine, and knife edge. Menus, the vending cache, and the pack use larger touch targets. Pad and keyboard prompts stay.

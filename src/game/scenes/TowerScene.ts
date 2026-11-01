@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { playClip, sfx, startAmbience, unlockAudio } from '../audio';
+import { playClip, playMusic, sfx, unlockAudio } from '../audio';
 import { paletteFor } from '../palette';
 import { saveSettings, settings } from '../settings';
 import { BULLET_SPEED, GRAVITY, IFRAME_TIME, MACAW_NOISE, ROOF_FLOOR } from '../balance';
@@ -8,16 +8,31 @@ import { Enemy } from '../entities/enemy';
 import { Player } from '../entities/player';
 import { input } from '../input';
 import { getLevel } from '../levels';
-import { RELOAD_WINDOW, beginReload, idleReload, JAM_DURATION, reloadProgress, tickReload, type ReloadState } from '../reload';
+import { RELOAD_DURATION, RELOAD_WINDOW, beginReload, idleReload, JAM_DURATION, reloadProgress, tickReload, type ReloadState } from '../reload';
 import { attemptPurchase, type ItemId } from '../shop';
 import { clearFloorBuffs, STEADY_WINDOW } from '../powerups';
 import { GEAR_IDS, clearSlot as dropSlot, equip, gearDef, grantGear, iframeBonus, incomingDamage, slotLabel, speedScale, useHealthItem, type GearId, type Slot } from '../gear';
 import { hone, strike, type MeleeWeapon } from '../knife';
 import { bulletSpread, createRun, gearLevel, noiseRadius, recoilScale, type RunState } from '../state';
-import type { LevelData, Rect } from '../types';
+import type { CampStationId, LevelData, Rect } from '../types';
+import {
+  DEATH_PITY,
+  HATCH_BONUS,
+  addSalvage,
+  buyStation,
+  campTier,
+  maxUnlockedFloor,
+  metaState,
+  resetMeta,
+  salvageFromClear,
+  salvageFromCoins,
+  saveMeta,
+  widenedWindow,
+  type StationId,
+} from '../meta';
 import { ui } from '../../ui/ui';
 
-type Phase = 'menu' | 'play' | 'shop' | 'wager' | 'pause' | 'gear' | 'transition' | 'down' | 'ending';
+type Phase = 'menu' | 'play' | 'shop' | 'wager' | 'pause' | 'gear' | 'station' | 'notices' | 'transition' | 'down' | 'dead' | 'ending';
 
 interface LiveDoor {
   id: string;
@@ -106,6 +121,7 @@ export class TowerScene extends Phaser.Scene {
   private flashGfx!: Phaser.GameObjects.Graphics;
   private lightDefs: LevelData['lights'] = [];
   private transitioning = false;
+  private campStations: { id: CampStationId; rect: Rect }[] = [];
 
   constructor() {
     super('tower');
@@ -137,6 +153,7 @@ export class TowerScene extends Phaser.Scene {
     this.level = getLevel(this.run.floor, {
       seed: this.run.seed,
       seenNotes: this.run.notes.map((note) => note.id),
+      campTier: campTier(metaState()),
     });
     if (this.level.builtSeed != null) this.run.builtSeed = this.level.builtSeed;
     if (this.run.checkpoint.floor !== this.level.id) {
@@ -207,6 +224,30 @@ export class TowerScene extends Phaser.Scene {
       equip: (id) => this.wear(id),
       clearSlot: (slot) => this.takeOff(slot),
       useHealth: () => this.useHealth(),
+      buyStation: (id) => this.improveStation(id),
+      closeStation: () => this.closeStation(),
+      showNotices: () => this.openNotices(),
+      returnToCamp: () => this.returnToCamp(),
+      resetProgress: () => this.resetProgress(),
+      noticeSettings: () => {
+        this.closeNotices();
+        ui.showSettings();
+      },
+      noticeControls: () => {
+        this.closeNotices();
+        ui.showControls();
+      },
+      noticeCredits: () => {
+        this.closeNotices();
+        ui.showCredits();
+      },
+      leaveClimb: () => {
+        if (this.level.id <= 1) {
+          ui.toast('You are already in the lobby.');
+          return;
+        }
+        this.endRun('leave');
+      },
     });
 
     const debug = import.meta.env.DEV || new URLSearchParams(location.search).has('debug');
@@ -267,38 +308,64 @@ export class TowerScene extends Phaser.Scene {
         give: (id: string) => {
           if ((GEAR_IDS as string[]).includes(id)) grantGear(this.run, id as GearId);
         },
+        setSalvage: (n: number) => {
+          const meta = metaState();
+          meta.salvage = n;
+          saveMeta(meta);
+          this.syncHud();
+        },
+        setStations: (n: number) => {
+          const meta = metaState();
+          const level = Math.max(0, Math.min(3, n));
+          meta.stations.workbench = level;
+          meta.stations.armory = level;
+          meta.stations.infirmary = level;
+          meta.stations.radio = level;
+          saveMeta(meta);
+          this.run.started = true;
+          this.run.floor = 1;
+          this.scene.restart({ floor: 1 });
+        },
+        openStation: (id: string) => this.openStation(id as StationId),
+        die: () => this.endRun('dead'),
+        pocket: (n: number) => {
+          this.run.salvageEarned += n;
+          addSalvage(n);
+        },
       };
     }
 
+    ui.hideMenu();
     if (this.run.started) {
       this.phase = 'play';
-      ui.hideMenu();
       ui.playMode(true);
       ui.hideTransition();
       this.afterEnter();
-    } else {
+      this.syncMusic();
+    } else if (!settings.introSeen) {
       this.phase = 'menu';
       this.physics.pause();
-      ui.showMenu();
       ui.playMode(false);
+      ui.showIntro(false, () => {
+        settings.introSeen = true;
+        saveSettings(settings);
+        this.begin();
+      });
+    } else {
+      this.begin();
     }
     this.syncHud();
   }
 
   private startClimb(): void {
     if (this.phase !== 'menu') return;
-    unlockAudio();
-    if (!settings.introSeen) {
-      ui.showIntro(false, () => {
-        settings.introSeen = true;
-        saveSettings(settings);
-        this.begin();
-        if (!settings.lowEffects) startAmbience();
-      });
-      return;
-    }
     this.begin();
-    if (!settings.lowEffects) startAmbience();
+  }
+
+  private syncMusic(): void {
+    if (this.level.id <= 1) playMusic('camp');
+    else if (this.level.id >= 16) playMusic('hatch');
+    else playMusic('climb');
   }
 
   private applySeed(seed: number): void {
@@ -388,14 +455,23 @@ export class TowerScene extends Phaser.Scene {
   }
 
   private begin(): void {
-    if (this.phase !== 'menu') return;
     this.run.started = true;
     this.phase = 'play';
     this.physics.resume();
     unlockAudio();
     ui.hideMenu();
     ui.playMode(true);
-    ui.toast('Sidearm, knife, flare gun. Save the flare for the roof.');
+    this.syncMusic();
+    if (this.level.id <= 1) {
+      const meta = metaState();
+      if (!meta.tutorialSeen) {
+        meta.tutorialSeen = true;
+        saveMeta(meta);
+        ui.toast('The lobby is empty. Stations take salvage. The stairs on the right start a climb.');
+      }
+    } else {
+      ui.toast('Sidearm, knife, flare gun. Salvage stays if you fall. The gear does not.');
+    }
     this.afterEnter();
   }
 
@@ -493,6 +569,7 @@ export class TowerScene extends Phaser.Scene {
       weapon: this.meleeWeapon(),
       sharpened: this.run.buffs.sharpened,
       roll: Math.random(),
+      wearScale: this.run.wearScale,
     });
     this.run.knife = blow.durability;
     this.player.meleeCd = blow.cooldown;
@@ -603,8 +680,11 @@ export class TowerScene extends Phaser.Scene {
       this.startReload();
       return;
     }
+    const duration = RELOAD_DURATION * this.run.reloadScale;
+    const sweet = widenedWindow(this.run.buffs.steady ? STEADY_WINDOW : RELOAD_WINDOW, this.run.windowWiden);
     const result = tickReload(this.reload, dt, tap && this.reload.phase !== 'idle', {
-      window: this.run.buffs.steady ? STEADY_WINDOW : RELOAD_WINDOW,
+      window: sweet,
+      duration,
       oil: this.run.buffs.oil,
     });
     this.reload = result.state;
@@ -619,8 +699,7 @@ export class TowerScene extends Phaser.Scene {
       ui.toast('Jammed.');
       this.cameras.main.shake(140, 0.007);
     }
-    const sweet = this.run.buffs.steady ? STEADY_WINDOW : RELOAD_WINDOW;
-    if (this.reload.phase === 'active') ui.setReload(reloadProgress(this.reload), false, sweet);
+    if (this.reload.phase === 'active') ui.setReload(reloadProgress(this.reload, duration), false, sweet);
     else if (this.reload.phase === 'jammed') ui.setReload(1 - this.reload.t / JAM_DURATION, true);
     else ui.setReload(null, false);
   }
@@ -706,6 +785,9 @@ export class TowerScene extends Phaser.Scene {
         sfx.pickup();
       } else if (pickup.kind === 'coin' && pickup.amount) {
         this.run.coins += pickup.amount;
+        const pocket = salvageFromCoins(pickup.amount);
+        this.run.salvageEarned += pocket;
+        addSalvage(pocket);
         this.floatText(pickup.rect.x, pickup.rect.y, `+${pickup.amount}`, '#e0b15a');
         sfx.pickup();
       } else if (pickup.kind === 'medkit' && pickup.heal) {
@@ -772,11 +854,29 @@ export class TowerScene extends Phaser.Scene {
       if (onTop) this.startCollapse();
     }
 
+    for (const station of this.campStations) {
+      if (!overlaps(body, station.rect, 8)) continue;
+      const label =
+        station.id === 'climb'
+          ? 'start the climb'
+          : station.id === 'notices'
+            ? 'notices'
+            : station.id;
+      prompt = `${input.label('interact')}  ·  ${label}`;
+      if (interactEdge) this.useStation(station.id);
+    }
+
     for (const exit of this.exits) {
-      if (overlaps(body, exit, 0)) {
-        this.gotoFloor(this.level.id + 1);
-        return;
+      if (!overlaps(body, exit, 0)) continue;
+      const next = this.level.id + 1;
+      const cap = maxUnlockedFloor(metaState());
+      if (next <= ROOF_FLOOR && next > cap) {
+        prompt = `${input.label('interact')}  ·  radio stops at floor ${cap}`;
+        if (interactEdge) this.endRun('leave');
+        break;
       }
+      this.gotoFloor(next);
+      return;
     }
 
     ui.setPrompt(prompt);
@@ -926,6 +1026,22 @@ export class TowerScene extends Phaser.Scene {
    */
   private routeMenus(frame: { jumpEdge: boolean; interactEdge: boolean; pauseEdge: boolean; meleeEdge: boolean; navEdge: -1 | 0 | 1 }): boolean {
     const pad = input.device === 'pad';
+    if (this.phase === 'dead' && (frame.jumpEdge || frame.interactEdge || frame.pauseEdge)) {
+      this.returnToCamp();
+      return true;
+    }
+    if (this.phase === 'station') {
+      if (frame.jumpEdge) {
+        const id = document.getElementById('station')?.dataset.station as StationId | undefined;
+        if (id) this.improveStation(id);
+      }
+      if (frame.interactEdge || frame.pauseEdge) this.closeStation();
+      return true;
+    }
+    if (this.phase === 'notices') {
+      if (frame.interactEdge || frame.pauseEdge) this.closeNotices();
+      return true;
+    }
     if (pad && this.phase === 'menu' && (frame.jumpEdge || frame.pauseEdge)) {
       this.begin();
       return true;
@@ -1014,29 +1130,140 @@ export class TowerScene extends Phaser.Scene {
   }
 
   private down(): void {
-    if (this.phase !== 'play') return;
-    this.phase = 'down';
-    this.run.hp = 0;
+    this.endRun('dead');
+  }
+
+  private endRun(reason: 'dead' | 'leave' | 'hatch'): void {
+    if (this.phase === 'dead' || this.phase === 'ending') return;
+    this.phase = 'dead';
+    this.physics.pause();
+    this.run.hp = reason === 'dead' ? 0 : this.run.hp;
     ui.setPrompt(null);
-    ui.flashHurt();
-    this.time.delayedCall(380, () => {
-      if (this.phase !== 'down') return;
-      const mark = this.run.checkpoint;
-      this.player.place(mark.x, mark.y);
-      this.run.hp = this.run.maxHp;
-      this.player.iframes = 1.15;
-      this.reload = idleReload();
-      ui.setReload(null, false);
-      this.phase = 'play';
-      this.cameras.main.flash(180, 20, 8, 8);
+    ui.hideShop();
+    ui.hidePause();
+    ui.hideGear();
+    ui.hideStation();
+    if (reason === 'dead') {
+      this.run.salvageEarned += DEATH_PITY;
+      addSalvage(DEATH_PITY);
+      ui.flashHurt();
+    }
+    const meta = metaState();
+    meta.runs += 1;
+    meta.bestFloor = Math.max(meta.bestFloor, this.run.floor);
+    saveMeta(meta);
+    ui.playMode(false);
+    this.syncHud();
+    ui.showRunEnd({
+      reason,
+      earned: this.run.salvageEarned,
+      total: meta.salvage,
+      floor: this.run.floor,
     });
+  }
+
+  private returnToCamp(): void {
+    const run = createRun();
+    run.started = true;
+    run.floor = 1;
+    this.registry.set('run', run);
+    ui.hideOverlays();
+    this.scene.restart({ floor: 1 });
+  }
+
+  private beginClimb(): void {
+    const run = createRun();
+    run.started = true;
+    run.floor = 2;
+    if (settings.seed == null) run.seed = 1 + Math.floor(Math.random() * 900000);
+    this.registry.set('run', run);
+    ui.hideOverlays();
+    this.scene.restart({ floor: 2 });
+  }
+
+  private useStation(id: CampStationId): void {
+    if (id === 'climb') {
+      this.beginClimb();
+      return;
+    }
+    if (id === 'notices') {
+      this.openNotices();
+      return;
+    }
+    this.openStation(id);
+  }
+
+  private openStation(id: StationId): void {
+    if (this.phase !== 'play' && this.phase !== 'station') return;
+    this.phase = 'station';
+    this.physics.pause();
+    ui.setPrompt(null);
+    ui.showStation(metaState(), id);
+  }
+
+  private closeStation(): void {
+    if (this.phase !== 'station') return;
+    this.phase = 'play';
+    this.physics.resume();
+    ui.hideStation();
+  }
+
+  private openNotices(): void {
+    if (this.phase !== 'play' && this.phase !== 'notices') return;
+    this.phase = 'notices';
+    this.physics.pause();
+    ui.setPrompt(null);
+    ui.showNotices();
+  }
+
+  private closeNotices(): void {
+    if (this.phase !== 'notices') return;
+    this.phase = 'play';
+    this.physics.resume();
+    ui.hideNotices();
+  }
+
+  private improveStation(id: StationId): void {
+    const result = buyStation(metaState(), id);
+    if (!result.ok) {
+      ui.stationMessage(result.reason ?? 'No.');
+      sfx.dry();
+      return;
+    }
+    sfx.pickup();
+    ui.toast('The lobby closes in a little.');
+    this.run.started = true;
+    this.run.floor = 1;
+    ui.hideOverlays();
+    this.scene.restart({ floor: 1 });
+  }
+
+  private resetProgress(): void {
+    resetMeta();
+    ui.toast('Salvage and the stations are cleared. The lobby is bare again.');
+    ui.hideSettings();
+    if (this.level.id <= 1) {
+      this.run.started = true;
+      this.scene.restart({ floor: 1 });
+    }
   }
 
   private gotoFloor(next: number): void {
     if (this.transitioning || (this.phase !== 'play' && this.phase !== 'menu')) return;
     if (next > ROOF_FLOOR) {
-      this.ending();
+      this.run.salvageEarned += HATCH_BONUS;
+      addSalvage(HATCH_BONUS);
+      this.endRun('hatch');
       return;
+    }
+    if (next > maxUnlockedFloor(metaState())) {
+      ui.toast(`The radio has not heard past floor ${maxUnlockedFloor(metaState())}.`);
+      return;
+    }
+    if (this.level.id >= 2) {
+      const bonus = salvageFromClear(this.level.id);
+      this.run.salvageEarned += bonus;
+      addSalvage(bonus);
     }
     clearFloorBuffs(this.run.buffs);
     this.transitioning = true;
@@ -1050,15 +1277,6 @@ export class TowerScene extends Phaser.Scene {
     void ui.showTransition(level.name, level.enter).then(() => {
       this.scene.restart({ floor: next });
     });
-  }
-
-  private ending(): void {
-    if (this.phase === 'ending') return;
-    this.phase = 'ending';
-    this.physics.pause();
-    ui.playMode(false);
-    ui.setPrompt(null);
-    ui.showEnding(this.run);
   }
 
   private emitNoise(x: number, y: number, radius: number, alpha: number): void {
@@ -1105,6 +1323,7 @@ export class TowerScene extends Phaser.Scene {
       compensated: this.run.owned.compensator,
       notes: this.run.notes.length,
       flareShells: this.run.buffs.flareShells,
+      salvage: metaState().salvage,
       helmet: this.run.loadout.helmet ?? '',
       armor: this.run.loadout.armor ?? '',
       weapon: slotLabel(this.run.loadout, 'weapon'),
@@ -1295,6 +1514,35 @@ export class TowerScene extends Phaser.Scene {
       const shop = this.level.shop;
       this.add.sprite(shop.x, shop.y, ATLAS, 'vending').setOrigin(0.5, 1).setDepth(8);
       this.shopRect = { x: shop.x - 28, y: shop.y - 64, w: 60, h: 68 };
+    }
+    this.campStations = [];
+    for (const station of this.level.stations ?? []) {
+      const sprite =
+        station.id === 'armory'
+          ? this.add.sprite(station.x, station.y, ATLAS, 'vending').setOrigin(0.5, 1).setDepth(8)
+          : station.id === 'infirmary'
+            ? this.add.sprite(station.x, station.y, ATLAS, 'medkit').setOrigin(0.5, 1).setDepth(8).setScale(1.6)
+            : station.id === 'notices'
+              ? this.add.sprite(station.x, station.y, ATLAS, 'note').setOrigin(0.5, 1).setDepth(8).setScale(1.8)
+              : this.add.sprite(station.x, station.y, ATLAS, 'terminal').setOrigin(0.5, 1).setDepth(8);
+      if (station.id === 'radio') sprite.setTint(0x9aa4d0);
+      if (station.id === 'workbench') sprite.setTint(0xd7a15f);
+      if (station.id === 'climb') sprite.setTint(0xe0b15a);
+      this.campStations.push({
+        id: station.id,
+        rect: { x: station.x - 28, y: station.y - 64, w: 64, h: 70 },
+      });
+    }
+    const dressColor: Record<string, number> = {
+      barricade: 0x4a3428,
+      sandbag: 0x6a6450,
+      patch: 0x8a8474,
+      rubble: 0x1c1a18,
+    };
+    for (const piece of this.level.dressing ?? []) {
+      this.add
+        .rectangle(piece.x + piece.w / 2, piece.y + piece.h / 2, piece.w, piece.h, dressColor[piece.kind] ?? 0x333028)
+        .setDepth(piece.kind === 'patch' ? 2 : 7);
     }
     if (this.level.challenge) {
       const machine = this.level.challenge;

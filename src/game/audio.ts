@@ -34,10 +34,15 @@ export function toggleMute(): boolean {
   if (muted) {
     drone?.gain.gain.setTargetAtTime(0, ctx?.currentTime ?? 0, 0.05);
     for (const bed of beds) bed.pause();
+    duckMusic(0.0001);
   } else {
     unlockAudio();
     if (drone && ctx) drone.gain.gain.setTargetAtTime(0.018, ctx.currentTime, 0.2);
-    // Beds were stopped with the mute. A new climb starts them again.
+    if (musicSlot) {
+      const slot = musicSlot;
+      musicSlot = null;
+      playMusic(slot);
+    }
   }
   return muted;
 }
@@ -249,8 +254,93 @@ export function stopClip(audio: ClipHandle | null): void {
   beds.delete(audio);
 }
 
+export type MusicSlot = 'camp' | 'climb' | 'hatch';
+
+const MUSIC_EXTS = ['ogg', 'm4a', 'mp3'] as const;
+let musicSlot: MusicSlot | null = null;
+let musicGain: GainNode | null = null;
+let musicSource: AudioBufferSourceNode | null = null;
+const musicBuffers = new Map<string, AudioBuffer>();
+let musicToken = 0;
+
+/**
+ * Loop a music slot and crossfade off the previous one.
+ * Files are public/audio/music/<slot>.ogg, with .m4a and .mp3 as fallbacks.
+ */
+export function playMusic(slot: MusicSlot): void {
+  if (slot === musicSlot && musicSource) return;
+  stopAmbience();
+  if (muted) {
+    musicSlot = slot;
+    return;
+  }
+  const c = context();
+  if (!c) {
+    musicSlot = slot;
+    return;
+  }
+  const token = ++musicToken;
+  void crossfadeMusic(c, slot, token);
+}
+
+async function loadMusic(c: AudioContext, slot: MusicSlot): Promise<AudioBuffer | null> {
+  for (const ext of MUSIC_EXTS) {
+    const key = `${slot}.${ext}`;
+    const cached = musicBuffers.get(key);
+    if (cached) return cached;
+    try {
+      const response = await fetch(`${import.meta.env.BASE_URL}audio/music/${key}`);
+      if (!response.ok) continue;
+      const bytes = await response.arrayBuffer();
+      const buffer = await c.decodeAudioData(bytes.slice(0));
+      musicBuffers.set(key, buffer);
+      return buffer;
+    } catch {
+      // Try the next extension.
+    }
+  }
+  return null;
+}
+
+async function crossfadeMusic(c: AudioContext, slot: MusicSlot, token: number): Promise<void> {
+  const buffer = await loadMusic(c, slot);
+  if (token !== musicToken || !buffer) return;
+  const now = c.currentTime;
+  const gain = c.createGain();
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.linearRampToValueAtTime(0.16, now + 1.2);
+  gain.connect(c.destination);
+  const src = c.createBufferSource();
+  src.buffer = buffer;
+  src.loop = true;
+  src.connect(gain);
+  src.start();
+  if (musicGain && musicSource) {
+    const oldGain = musicGain;
+    const oldSrc = musicSource;
+    oldGain.gain.cancelScheduledValues(now);
+    oldGain.gain.setValueAtTime(Math.max(0.0001, oldGain.gain.value), now);
+    oldGain.gain.linearRampToValueAtTime(0.0001, now + 1.2);
+    window.setTimeout(() => {
+      try {
+        oldSrc.stop();
+      } catch {
+        // Already stopped.
+      }
+    }, 1300);
+  }
+  musicGain = gain;
+  musicSource = src;
+  musicSlot = slot;
+}
+
+function duckMusic(level: number): void {
+  if (!musicGain || !ctx) return;
+  musicGain.gain.setTargetAtTime(level, ctx.currentTime, 0.08);
+}
+
 export function startAmbience(): void {
-  if (pianoBed) return;
+  if (pianoBed || musicSource) return;
   pianoBed = playClip('piano', 0.07, true);
 }
 

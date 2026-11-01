@@ -148,7 +148,7 @@ Three slots loop and crossfade when you move between the lobby, the climb, and f
 | Climb | `public/audio/music/climb.ogg` |
 | Hatch | `public/audio/music/hatch.ogg` |
 
-Replace a slot by dropping a file on that name. `.ogg` (Vorbis) is the one to use for the Android WebView: it is small, Chromium decodes it, and a loop crossfades cleanly. `.m4a` (AAC) is the other phone-friendly choice. `.mp3` also plays. If several extensions share a name, `.ogg` is the one that loads. Do not use WAV; it is heavy to decode on a phone. The files shipping here are CC0 placeholders (a piano sting and the Abyss bed). Credits, including an **Original music by the user** section, are in `AUDIO_CREDITS.md`.
+The lobby slot is an original track, `camp.ogg` (Vorbis, about 3:25). It streams when you enter the camp and loops there; it is not decoded during startup, because expanding it to raw audio would be on the order of 80 MB. Climb and hatch are still short CC0 placeholders. `.ogg` is the format the Android WebView should use. `.m4a` and `.mp3` also play, and `.ogg` wins if more than one extension is present. Credits are in `AUDIO_CREDITS.md`.
 
 ## Phone performance
 

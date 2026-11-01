@@ -1,6 +1,7 @@
 /**
  * Gunfire, melee, and UI stings stay synthesized.
- * Weather, the door, the walls, and the music beds are CC0 files in public/audio.
+ * Weather, the door, and the walls are CC0 files in public/audio.
+ * The camp theme is original music and is streamed, not decoded at startup.
  * See AUDIO_CREDITS.md.
  */
 
@@ -257,18 +258,36 @@ export function stopClip(audio: ClipHandle | null): void {
 export type MusicSlot = 'camp' | 'climb' | 'hatch';
 
 const MUSIC_EXTS = ['ogg', 'm4a', 'mp3'] as const;
+
+interface MusicBed {
+  audio: HTMLAudioElement;
+  gain: GainNode;
+  source: MediaElementAudioSourceNode;
+}
+
 let musicSlot: MusicSlot | null = null;
+let musicRequested: MusicSlot | null = null;
 let musicGain: GainNode | null = null;
-let musicSource: AudioBufferSourceNode | null = null;
-const musicBuffers = new Map<string, AudioBuffer>();
+let musicBed: MusicBed | null = null;
 let musicToken = 0;
+
+window.addEventListener('pointerdown', () => {
+  if (!musicRequested) return;
+  if (musicBed && !musicBed.audio.paused) return;
+  const slot = musicRequested;
+  musicSlot = null;
+  playMusic(slot);
+});
 
 /**
  * Loop a music slot and crossfade off the previous one.
- * Files are public/audio/music/<slot>.ogg, with .m4a and .mp3 as fallbacks.
+ * Nothing is fetched until a slot is actually playing. The file streams
+ * through an audio element, so the 3-minute camp theme is not decoded into
+ * a full PCM buffer during startup. `.ogg` wins when several extensions exist.
  */
 export function playMusic(slot: MusicSlot): void {
-  if (slot === musicSlot && musicSource) return;
+  musicRequested = slot;
+  if (slot === musicSlot && musicBed && !musicBed.audio.paused) return;
   stopAmbience();
   if (muted) {
     musicSlot = slot;
@@ -283,54 +302,80 @@ export function playMusic(slot: MusicSlot): void {
   void crossfadeMusic(c, slot, token);
 }
 
-async function loadMusic(c: AudioContext, slot: MusicSlot): Promise<AudioBuffer | null> {
+function musicUrl(slot: MusicSlot, ext: (typeof MUSIC_EXTS)[number]): string {
+  return `${import.meta.env.BASE_URL}audio/music/${slot}.${ext}`;
+}
+
+async function openMusic(slot: MusicSlot): Promise<HTMLAudioElement | null> {
   for (const ext of MUSIC_EXTS) {
-    const key = `${slot}.${ext}`;
-    const cached = musicBuffers.get(key);
-    if (cached) return cached;
-    try {
-      const response = await fetch(`${import.meta.env.BASE_URL}audio/music/${key}`);
-      if (!response.ok) continue;
-      const bytes = await response.arrayBuffer();
-      const buffer = await c.decodeAudioData(bytes.slice(0));
-      musicBuffers.set(key, buffer);
-      return buffer;
-    } catch {
-      // Try the next extension.
-    }
+    const audio = new Audio();
+    audio.preload = 'auto';
+    audio.loop = true;
+    audio.dataset.musicSlot = slot;
+    audio.style.display = 'none';
+    document.body.appendChild(audio);
+    const ok = await new Promise<boolean>((resolve) => {
+      const finish = (good: boolean) => {
+        audio.removeEventListener('canplay', onReady);
+        audio.removeEventListener('error', onError);
+        resolve(good);
+      };
+      const onReady = () => finish(true);
+      const onError = () => finish(false);
+      audio.addEventListener('canplay', onReady);
+      audio.addEventListener('error', onError);
+      audio.src = musicUrl(slot, ext);
+    });
+    if (ok) return audio;
+    audio.pause();
+    audio.removeAttribute('src');
+    audio.remove();
   }
   return null;
 }
 
+function releaseBed(bed: MusicBed): void {
+  bed.audio.pause();
+  bed.audio.loop = false;
+  bed.audio.removeAttribute('src');
+  bed.audio.remove();
+  try {
+    bed.source.disconnect();
+    bed.gain.disconnect();
+  } catch {
+    // Already disconnected.
+  }
+}
+
 async function crossfadeMusic(c: AudioContext, slot: MusicSlot, token: number): Promise<void> {
-  const buffer = await loadMusic(c, slot);
-  if (token !== musicToken || !buffer) return;
-  const now = c.currentTime;
+  const audio = await openMusic(slot);
+  if (token !== musicToken || !audio) return;
+  const source = c.createMediaElementSource(audio);
   const gain = c.createGain();
+  const now = c.currentTime;
   gain.gain.setValueAtTime(0.0001, now);
   gain.gain.linearRampToValueAtTime(0.16, now + 1.2);
+  source.connect(gain);
   gain.connect(c.destination);
-  const src = c.createBufferSource();
-  src.buffer = buffer;
-  src.loop = true;
-  src.connect(gain);
-  src.start();
-  if (musicGain && musicSource) {
-    const oldGain = musicGain;
-    const oldSrc = musicSource;
-    oldGain.gain.cancelScheduledValues(now);
-    oldGain.gain.setValueAtTime(Math.max(0.0001, oldGain.gain.value), now);
-    oldGain.gain.linearRampToValueAtTime(0.0001, now + 1.2);
-    window.setTimeout(() => {
-      try {
-        oldSrc.stop();
-      } catch {
-        // Already stopped.
-      }
-    }, 1300);
+  try {
+    await audio.play();
+  } catch {
+    releaseBed({ audio, gain, source });
+    return;
   }
+  if (token !== musicToken) {
+    releaseBed({ audio, gain, source });
+    return;
+  }
+  const previous = musicBed;
+  if (previous) {
+    previous.gain.gain.cancelScheduledValues(now);
+    previous.gain.gain.setValueAtTime(Math.max(0.0001, previous.gain.gain.value), now);
+    previous.gain.gain.linearRampToValueAtTime(0.0001, now + 1.2);
+    window.setTimeout(() => releaseBed(previous), 1300);
+  }
+  musicBed = { audio, gain, source };
   musicGain = gain;
-  musicSource = src;
   musicSlot = slot;
 }
 
@@ -340,7 +385,7 @@ function duckMusic(level: number): void {
 }
 
 export function startAmbience(): void {
-  if (pianoBed || musicSource) return;
+  if (pianoBed || musicBed) return;
   pianoBed = playClip('piano', 0.07, true);
 }
 

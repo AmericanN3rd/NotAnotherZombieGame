@@ -253,8 +253,7 @@ root.innerHTML = `
       <h2>Credits</h2>
       <p>You are alone in the tower. The stations are furniture.</p>
       <p class="empty">Sound effects in the climb are synthesized. Weather, the door, and the walls are CC0 files listed in AUDIO_CREDITS.md.</p>
-      <p class="empty">Music slots: camp, climb, and the hatch. The files in public/audio/music/ are CC0 placeholders until original tracks replace them.</p>
-      <p><strong>Original music by the user.</strong> Drop camp, climb, and hatch into public/audio/music/.</p>
+      <p class="empty">The lobby theme is original music by American Nerd. Climb and hatch are still CC0 placeholders. See AUDIO_CREDITS.md.</p>
       <button id="credits-close" type="button">Step back</button>
     </div>
   </section>

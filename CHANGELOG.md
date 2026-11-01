@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- The lobby plays the original basecamp theme (`public/audio/music/camp.ogg`). The CC0 piano placeholder for that slot is gone. Climb and hatch are unchanged.
+- The track streams when the camp starts and loops through the same crossfade. It is not fetched or decoded during startup.
+- Debug APK stays on the committed `androiddebugkey` certificate, versionCode 4, so it installs over 0.3.0.
+
 ## 0.3.0
 
 - Floor 1 is the lobby camp and the main menu. Notices on the wall open settings, controls, and credits. The stairs start a climb. Nobody else is there.

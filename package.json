@@ -1,7 +1,7 @@
 {
   "name": "nazg",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "NAZG (Not Another Zombie Game) — a private roguelike climb with a lobby camp",
   "type": "module",
   "scripts": {

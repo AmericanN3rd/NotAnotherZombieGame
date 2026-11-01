@@ -1,0 +1,17 @@
+node_modules
+dist
+.DS_Store
+*.local
+.vite
+playwright-report
+test-results
+*.jks
+*.keystore
+!android/app/debug.keystore
+android/local.properties
+android/.gradle
+android/app/build
+android/build
+android/app/src/main/assets/public
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json

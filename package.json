@@ -1,0 +1,27 @@
+{
+  "name": "nazg",
+  "private": true,
+  "version": "0.3.1",
+  "description": "NAZG (Not Another Zombie Game) — a private roguelike climb with a lobby camp",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host --port 4173",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.6.10",
+    "@capacitor/app": "^7.1.2",
+    "@capacitor/browser": "^7.0.5",
+    "@capacitor/core": "^7.6.10",
+    "@capacitor/status-bar": "^7.0.6",
+    "phaser": "^3.88.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.6.10",
+    "typescript": "^5.6.3",
+    "vite": "^6.2.0",
+    "vitest": "^3.0.9"
+  }
+}
